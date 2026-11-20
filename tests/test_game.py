@@ -91,3 +91,34 @@ def test_failed_inference_preserves_answers_and_allows_retry(monkeypatch):
     click(app, "Play Again")
     assert app.session_state.screen == "setup"
     assert not any(any(player) for player in app.session_state.answers)
+
+
+def test_header_navigation_saves_unsubmitted_drafts():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    click(app, "Start Game →")
+    app.text_input[0].set_value("Alex")
+    app.text_input[1].set_value("Jordan")
+    click(app, "✦ AI MatchLab")
+    click(app, "Resume round →")
+    assert [entry.value for entry in app.text_input] == ["Alex", "Jordan"]
+
+    click(app, "Continue →")
+    first_scene = app.session_state.scene
+    click(app, "Next →")
+    assert app.session_state.scene == first_scene
+
+    app.text_area[0].set_value("A draft worth keeping.")
+    click(app, "About")
+    assert app.session_state.view == "about"
+    assert any("About AI MatchLab" in entry.value for entry in app.markdown)
+    assert not app.text_area
+    click(app, "← Back to Home")
+    click(app, "Resume round →")
+    assert app.text_area[0].value == "A draft worth keeping."
+    click(app, "Next →")
+    _, step, _, previous = app.session_state.scene
+    assert (previous, step) == (1, 2)
+    click(app, "← Back")
+    _, step, _, previous = app.session_state.scene
+    assert (previous, step) == (2, 1)
+    assert app.text_area[0].value == "A draft worth keeping."

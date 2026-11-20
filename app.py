@@ -23,19 +23,61 @@ def new_round(screen="setup"):
 
 
 if "screen" not in state:
-    state.update(mode="Bestie Mode", names=("", ""))
+    state.update(mode="Bestie Mode", names=("", ""), view="game")
     new_round("welcome")
 
+state.setdefault("view", "game")
 
-def go(screen):
-    state.update(screen=screen, error="")
-    st.rerun()
+
+def change_screen(screen, **fields):
+    state.update(screen=screen, error="", **fields)
+
+
+def start_round():
+    state.update(mode=state.mode_choice, view="game")
+    new_round()
+
+
+def open_view(view, draft=None):
+    """Save the current form before opening Home or About."""
+    if draft == "setup":
+        state.names = (state.setup_name_1.strip(), state.setup_name_2.strip())
+    elif draft:
+        state.answers[state.player][state.question] = state[draft]
+    state.view = view
+
+
+def header(draft=None):
+    with st.container(key="lab_header"):
+        brand, nav = st.columns([2, 1], vertical_alignment="center", gap="small")
+        for column, label, key, destination in (
+            (brand, "✦ AI MatchLab", "home_nav", "home"),
+            (nav, "About", "about_nav", "about"),
+        ):
+            with column:
+                button = st.form_submit_button if draft else st.button
+                button(label, key=key, type="tertiary", on_click=open_view, args=(destination, draft))
+
+
+def track_scene(screen):
+    """Give each visit a stable key and keep the previous question's progress."""
+    question = state.player * QUESTION_COUNT + state.question + 1 if screen == "question" else 0
+    previous_screen, previous_step, revision, origin = state.get("scene", ("", 0, 0, 0))
+    if (screen, question) != (previous_screen, previous_step):
+        origin = previous_step if previous_screen == screen == "question" else question
+        state.scene = (screen, question, revision + 1, origin)
+
+
+def scene_key(prefix):
+    visit = state.scene[2]
+    variant = "odd" if visit % 2 else "even"
+    return f"{prefix}_{variant}_{visit}"
 
 
 def welcome():
     left, right = st.columns([1.15, 1], vertical_alignment="center", gap="small")
     with left:
-        st.html('''<div class="hero-copy rise"><h1>AI MatchLab</h1>
+        st.html('''<div class="hero-copy"><h1>AI MatchLab</h1>
             <p class="tagline">Discover how well<br>your vibes match.</p>
             <p class="muted">Take turns answering five questions with a friend or partner.
             Then see where your answers overlap and what you could talk about next.</p></div>''')
@@ -45,24 +87,32 @@ def welcome():
 
     with st.container(key="mode_picker"):
         st.markdown("### Choose your mode")
-        mode = st.radio(
+        st.radio(
             "Game mode", list(QUESTIONS), index=list(QUESTIONS).index(state.mode),
-            horizontal=True, label_visibility="collapsed", width="stretch",
+            key="mode_choice", horizontal=True, label_visibility="collapsed", width="stretch",
             captions=("How well do you know your bestie?", "How well do your vibes match?"),
         )
     with st.container(key="start_game"):
-        if st.button("Start Game →", type="primary", width="stretch"):
-            state.mode = mode
-            new_round()
-            st.rerun()
+        paused = state.screen != "welcome"
+        if paused:
+            st.button("Resume round →", type="primary", width="stretch", on_click=open_view, args=("game",))
+        label = "Start a new round" if paused else "Start Game →"
+        st.button(label, type="secondary" if paused else "primary", width="stretch", on_click=start_round)
     st.html('<p class="center muted fine">An AI-powered game for entertainment and conversation.</p>')
 
 
-def stage_label(text):
+def stage_label(text, animate=False):
     mode_class = "couple" if state.mode == "Couple Mode" else "bestie"
     symbol = "♡" if mode_class == "couple" else "✦"
     st.html(f'<div class="stage-label {mode_class}"><span aria-hidden="true">{symbol}</span> '
-            f'{state.mode}<span class="stage-detail">{escape(text)}</span></div>')
+            f'{state.mode}<span class="stage-detail{" step-enter" if animate else ""}">{escape(text)}</span></div>')
+
+
+def progress_bar(value, label, *, previous=0, delay=0):
+    """Animate the fill independently of its accessible, final value."""
+    return (f'<div class="track" role="progressbar" aria-label="{escape(label)}" '
+            f'aria-valuenow="{value:.1f}" aria-valuemin="0" aria-valuemax="100">'
+            f'<span style="--from:{previous / 100:.6f};--to:{value / 100:.6f};--delay:{delay}ms"></span></div>')
 
 
 def save_names(destination):
@@ -74,21 +124,27 @@ def save_names(destination):
 
 
 def setup():
-    stage_label("Player setup")
     state.setup_name_1, state.setup_name_2 = state.names
+    with st.form("player_setup_form", border=False, enter_to_submit=False):
+        header("setup")
+        with st.container(key=scene_key("scene_setup")):
+            stage_label("Player setup")
+            setup_fields()
+
+
+def setup_fields():
     with st.container(key="setup_panel", border=True):
         st.markdown("## Who’s playing?")
         st.markdown("Use names or nicknames. You’ll answer separately on this device.")
-        with st.form("player_setup_form", border=False, enter_to_submit=False):
-            left, right = st.columns(2)
-            left.text_input("Player 1 name", key="setup_name_1", max_chars=32, placeholder="e.g. Alex")
-            right.text_input("Player 2 name", key="setup_name_2", max_chars=32, placeholder="e.g. Jordan")
-            back, forward = st.columns(2)
-            back.form_submit_button("← Back", width="stretch", on_click=save_names, args=("welcome",))
-            forward.form_submit_button("Continue →", type="primary", width="stretch",
-                                       on_click=save_names, args=("question",))
-            if state.error:
-                st.error(state.error)
+        left, right = st.columns(2)
+        left.text_input("Player 1 name", key="setup_name_1", max_chars=32, placeholder="e.g. Alex")
+        right.text_input("Player 2 name", key="setup_name_2", max_chars=32, placeholder="e.g. Jordan")
+        back, forward = st.columns(2)
+        back.form_submit_button("← Back", width="stretch", on_click=save_names, args=("welcome",))
+        forward.form_submit_button("Continue →", type="primary", width="stretch",
+                                   on_click=save_names, args=("question",))
+        if state.error:
+            st.error(state.error)
 
 
 def save_answer(player, index, widget_key, advance):
@@ -121,26 +177,36 @@ def question_screen():
     widget_key = f"answer_{player}_{index}"
     # The game owns drafts even after Streamlit removes old form widgets.
     state[widget_key] = state.answers[player][index]
-    stage_label(f"Player {player + 1} of 2 · Question {index + 1} of {QUESTION_COUNT}")
-    st.progress((player * QUESTION_COUNT + index + 1) / (2 * QUESTION_COUNT))
+    _, step, _, previous = state.scene
+    theme = "couple" if state.mode == "Couple Mode" else "bestie"
+    with st.form(f"question_{player}_{index}", border=False, enter_to_submit=False):
+        header(widget_key)
+        with st.container(key=scene_key(f"question_motion_{theme}")):
+            status = f"Player {player + 1} of 2 · Question {index + 1} of {QUESTION_COUNT}"
+            stage_label(status, animate=True)
+            total = 2 * QUESTION_COUNT
+            st.html(progress_bar(100 * step / total, "Round progress", previous=100 * previous / total))
+            question_fields(player, index, prompt, hint, widget_key)
+        st.html('<p class="center muted fine">Keep your screen to yourself while you answer.</p>')
+
+
+def question_fields(player, index, prompt, hint, widget_key):
     with st.container(key="question_panel", border=True):
         st.text(f"{state.names[player]}’s turn")
         st.markdown(f"## {prompt}")
         st.caption(hint)
-        with st.form(f"question_{player}_{index}", border=False, enter_to_submit=False):
-            st.text_area(
-                "Your answer", key=widget_key, max_chars=MAX_ANSWER_LENGTH,
-                placeholder="Write one or two short sentences in English…", height=115,
-            )
-            left, right = st.columns(2)
-            left.form_submit_button("← Back", width="stretch", on_click=save_answer,
-                                    args=(player, index, widget_key, False))
-            label = "Finish turn →" if index == QUESTION_COUNT - 1 else "Next →"
-            right.form_submit_button(label, type="primary", width="stretch",
-                                     on_click=save_answer, args=(player, index, widget_key, True))
-            if state.error:
-                st.error(state.error)
-    st.html('<p class="center muted fine">Keep your screen to yourself while you answer.</p>')
+        st.text_area(
+            "Your answer", key=widget_key, max_chars=MAX_ANSWER_LENGTH,
+            placeholder="Write one or two short sentences in English…", height=115,
+        )
+        left, right = st.columns(2)
+        left.form_submit_button("← Back", width="stretch", on_click=save_answer,
+                                args=(player, index, widget_key, False))
+        label = "Finish turn →" if index == QUESTION_COUNT - 1 else "Next →"
+        right.form_submit_button(label, type="primary", width="stretch",
+                                 on_click=save_answer, args=(player, index, widget_key, True))
+        if state.error:
+            st.error(state.error)
 
 
 def handoff():
@@ -150,15 +216,13 @@ def handoff():
         st.html(f'<h2>{escape(state.names[target])}, it’s your turn.</h2>')
         st.markdown("Pass the device to the player named above. Their answers will open when they’re ready.")
         left, right = st.columns(2)
-        if left.button("← Back to review" if state.editing else "← Player 1: Edit",
-                       width="stretch"):
-            if state.editing:
-                go("ready")
-            state.update(player=0, question=QUESTION_COUNT - 1)
-            go("question")
-        if right.button("I’m ready →", type="primary", width="stretch"):
-            state.update(player=target, question=0)
-            go("question")
+        if state.editing:
+            left.button("← Back to review", width="stretch", on_click=change_screen, args=("ready",))
+        else:
+            left.button("← Player 1: Edit", width="stretch", on_click=change_screen,
+                        args=("question",), kwargs={"player": 0, "question": QUESTION_COUNT - 1})
+        right.button("I’m ready →", type="primary", width="stretch", on_click=change_screen,
+                     args=("question",), kwargs={"player": target, "question": 0})
 
 
 def ready():
@@ -168,13 +232,11 @@ def ready():
         st.markdown("Reveal your scores together. The answer comparisons stay folded until you choose to open them.")
         if state.error:
             st.error(state.error)
-        if st.button("Try AI analysis again" if state.error else "Reveal our match →",
-                     type="primary", width="stretch"):
-            go("analysis")
+        st.button("Try AI analysis again" if state.error else "Reveal our match →",
+                  type="primary", width="stretch", on_click=change_screen, args=("analysis",))
         for player, column in enumerate(st.columns(2)):
-            if column.button(f"Edit Player {player + 1} answers", width="stretch"):
-                state.update(player=player, editing=True)
-                go("handoff")
+            column.button(f"Edit Player {player + 1} answers", width="stretch",
+                          on_click=change_screen, args=("handoff",), kwargs={"player": player, "editing": True})
 
 
 def analysis():
@@ -190,7 +252,8 @@ def analysis():
         # Keep user text and service internals out of the UI and application logs.
         state.update(screen="ready", error="The AI model could not finish. Check the connection and try again.")
         st.rerun()
-    go("results")
+    change_screen("results")
+    st.rerun()
 
 
 def highlight(title, index, result: MatchResult, column):
@@ -219,13 +282,16 @@ def results():
     )
     stage_label("Round complete")
     theme = "couple" if state.mode == "Couple Mode" else "bestie"
-    st.html(f'''<div class="score-panel rise {theme}">
+    st.html(f'''<div class="score-panel {theme}">
         <div><p class="score-label">Your Match Score</p><p class="score-number">{result.overall:.1f}<small> / 100</small></p></div>
         <div><h2>{left} &amp; {right}</h2><p>{title}</p></div>
+        <span class="score-sparkles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
         </div>''')
     st.markdown("## Vibe breakdown")
     for index, ((prompt, _), score) in enumerate(zip(QUESTIONS[state.mode], result.scores, strict=True)):
-        st.progress(score / 100, text=f"{index + 1}. {prompt} · {score:.1f}/100")
+        label = f"{index + 1}. {prompt} · {score:.1f}/100"
+        st.html(f'<div class="score-row"><p>{escape(label)}</p>'
+                f'{progress_bar(score, prompt, delay=index * 35)}</div>')
     if result.biggest_match == result.biggest_difference:
         st.caption("All five cosine scores tied. Both highlights show the first question.")
     left, right = st.columns(2)
@@ -233,12 +299,8 @@ def results():
     highlight("Your Biggest Difference", result.biggest_difference, result, right)
     st.caption("This entertainment score measures text similarity. The model can miss negation, context and tone. Your friendship or relationship can’t be measured by five answers.")
     again, switch = st.columns(2)
-    if again.button("Play Again", type="primary", width="stretch"):
-        new_round()
-        st.rerun()
-    if switch.button("Switch Mode", width="stretch"):
-        new_round("welcome")
-        st.rerun()
+    again.button("Play Again", type="primary", width="stretch", on_click=new_round)
+    switch.button("Switch Mode", width="stretch", on_click=new_round, args=("welcome",))
 
 
 def how_ai_works():
@@ -265,10 +327,51 @@ def how_ai_works():
         st.write("MiniLM is a compact, pretrained English sentence encoder. It runs on CPU and suits short answers, so the game can run without a paid AI API.")
 
 
-st.html('''<header class="lab-header"><div class="wordmark"><span aria-hidden="true">✦</span> AI MatchLab</div>
-    <a href="#how-ai-works">How AI works ↓</a></header>''')
-{
-    "welcome": welcome, "setup": setup, "question": question_screen,
+def about():
+    st.markdown("# About AI MatchLab")
+    st.write("Two people answer five questions, then the game compares how similar their written answers are. It’s a way to start a conversation and see a real AI model at work.")
+    st.markdown("## From answers to a score")
+    st.html('''<ol class="about-flow">
+        <li>Write your answers</li><li>Split the text into tokens</li>
+        <li>Make an embedding</li><li>Compare answers</li><li>See the game score</li>
+        </ol>''')
+    with st.container(key="about_topics"):
+        left, right = st.columns(2, gap="small")
+        with left:
+            with st.expander("What is NLP?"):
+                st.write("Natural language processing, or NLP, is how computers work with human language. A model can pick up on similar ideas even when two people use different words.")
+            with st.expander("What is a Transformer?"):
+                st.write("A Transformer is a way to build a language model. It uses attention to weigh how different parts of a sentence relate to each other. That helps it tell a river bank from a bank that handles money.")
+            with st.expander("What is BERT?"):
+                st.write("BERT stands for Bidirectional Encoder Representations from Transformers. It’s a related language model that uses context from both sides of a word. AI MatchLab uses the pretrained MiniLM sentence encoder described below. [Read the BERT paper](https://aclanthology.org/N19-1423/)")
+        with right:
+            with st.expander("What are embeddings?"):
+                st.write("The app first splits each answer into smaller pieces called tokens. MiniLM reads those pieces in context and combines them into one list of 384 numbers, called an embedding. You can think of it as an arrow that represents the answer.")
+            with st.expander("How does the real model score my answers?"):
+                st.write("The game uses cosine similarity to see how closely the two arrows point in the same direction. It turns negative values into zero, multiplies each similarity by 100, and averages the five question scores. The model was already trained when this project started.")
+                st.markdown(f"**Model** · [{MODEL_NAME}]({MODEL_URL})")
+            with st.expander("What does the score tell me?"):
+                st.write("The score describes similarity in what you wrote. Shared topics can score highly even when the answers disagree. Friendship, love and relationship success are outside what this score can measure.")
+    st.html('''<div class="example-pair"><div><strong>Person A</strong><br>I love watching movies.</div>
+        <div><strong>Person B</strong><br>I enjoy films.</div></div>''')
+    st.caption("Different words can point to the same idea. Both answers are about enjoying movies.")
+    st.markdown("## About the project")
+    st.write("Bryan Tock built AI MatchLab as an independent mini-project while studying for a Diploma in Applied AI & Analytics at Republic Polytechnic. It applies concepts from NVIDIA’s Building Transformer-Based Natural Language Processing Applications certification.")
+    st.button("← Back to Home", on_click=open_view, args=("home",))
+
+
+screen = {"home": "welcome", "about": "about"}.get(state.view, state.screen)
+track_scene(screen)
+if screen not in {"setup", "question"}:
+    header()
+render = {
+    "welcome": welcome, "about": about, "setup": setup, "question": question_screen,
     "handoff": handoff, "ready": ready, "analysis": analysis, "results": results,
-}[state.screen]()
-how_ai_works()
+}[screen]
+if screen in {"welcome", "about", "results"}:
+    with st.container(key=scene_key(f"scene_{screen}")):
+        render()
+else:
+    render()
+if screen != "about":
+    how_ai_works()
