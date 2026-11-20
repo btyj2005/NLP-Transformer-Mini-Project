@@ -152,6 +152,9 @@ button[data-testid^="stBaseButton"] {
         padding: .35rem .2rem; font-size: .72rem; line-height: 1.35;
         overflow-wrap: anywhere; word-break: normal;
     }
+    .st-key-simulation_table [data-testid="stTable"] :is(th, td) * {
+        font-size: inherit; line-height: inherit;
+    }
     .st-key-simulation_table th:nth-child(2) { width: 28%; }
     .st-key-simulation_table th:nth-child(3) { width: 20%; }
     .st-key-simulation_table th:nth-child(4) { width: 17%; }

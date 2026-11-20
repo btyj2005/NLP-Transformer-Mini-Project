@@ -144,6 +144,7 @@ def test_header_navigation_saves_unsubmitted_drafts():
     click(app, "About")
     assert app.session_state.view == "about"
     assert any("About AI MatchLab" in entry.value for entry in app.markdown)
+    assert any("grouped bar chart" in entry.value and "percentage points" in entry.value for entry in app.markdown)
     assert not app.text_area
     click(app, "← Back to Home")
     click(app, "Resume round →")
