@@ -1,0 +1,7 @@
+# Install CPU-only wheels on Windows and Streamlit Community Cloud's Linux x86-64.
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.8.0%2Bcpu-cp311-cp311-win_amd64.whl#sha256=7631ef49fbd38d382909525b83696dc12a55d68492ade4ace3883c62b9fc140f ; sys_platform == "win32" and platform_machine == "AMD64"
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.8.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl#sha256=cb06175284673a581dd91fb1965662ae4ecaba6e5c357aa0ea7bb8b84b6b7eeb ; sys_platform == "linux" and platform_machine == "x86_64"
+torch==2.8.0 ; sys_platform == "darwin" and platform_machine == "arm64"
+streamlit==1.52.2
+sentence-transformers==5.2.0
+transformers==4.57.6
