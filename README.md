@@ -67,8 +67,6 @@ In [Streamlit Community Cloud](https://share.streamlit.io/), choose **Create app
 - Loading the model once and reusing it makes a small CPU app more practical.
 - A clear handoff screen and saved drafts matter as much to the game as the model does.
 
-## Author and license
+## About the project
 
-**Bryan Tock**, Diploma in Applied AI & Analytics, Republic Polytechnic, Singapore.
-
-The original project code uses MIT. The MiniLM model, Sentence Transformers, Transformers, and Streamlit use Apache 2.0. PyTorch uses a BSD-style license. These projects retain their own licenses. The hero illustration was generated for this project. [Project license](LICENSE) · [MiniLM model card](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) · [Sentence Transformers](https://github.com/huggingface/sentence-transformers/blob/main/LICENSE) · [Transformers](https://github.com/huggingface/transformers/blob/main/LICENSE) · [Streamlit](https://github.com/streamlit/streamlit/blob/develop/LICENSE) · [PyTorch](https://github.com/pytorch/pytorch/blob/main/LICENSE)
+AI MatchLab is a student mini-project created to demonstrate what I learned from NVIDIA's Building Transformer-Based Natural Language Processing Applications course. It uses a pretrained Transformer model to compare the meanings of written answers.
