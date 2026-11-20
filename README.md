@@ -14,14 +14,17 @@ AI MatchLab is a two-player Streamlit game and student portfolio project. Friend
 - **Couple Mode** asks about dates, time together, appreciation, holidays and relationship values.
 - Each player answers privately on the same device. A handoff screen keeps the outgoing player’s answers out of view. Both players can revisit and edit their own answers before comparing.
 - The results show all five scores and the questions with the highest and lowest cosine values. Open a highlight together to read the two answers side by side.
+- **What If?** lets you try a replacement answer and compare the question score and overall match. Reset the experiment anytime. Your round answers and scores are kept intact.
+- **How did AI compare our answers?** shows the selected answers, their real model tokens, how sentence embeddings work and the question’s cosine similarity.
 - **About** explains NLP, Transformers, BERT and the MiniLM model behind the game. The AI MatchLab header button returns home, where you can resume a round with your draft intact.
 - The question card stays visible as you move through the round, and the progress bar updates in a single step.
 
 ![AI MatchLab results with a real model score and five question scores using fictional answers](assets/results.webp)
 
-## From the NVIDIA course to the app
+## From the NVIDIA courses to the app
 
-I built this mini-project after completing NVIDIA Deep Learning Institute’s *Building Transformer-Based Natural Language Processing Applications* certification. The course introduced text representations, embeddings, attention and BERT, and showed how tokenization and inference fit into a deployment pipeline. I applied those ideas to a small CPU-hosted game. Sentence Transformers, MiniLM and the game’s scoring formula are practical extensions I chose for this project.
+- **Building Transformer-Based Natural Language Processing Applications.** The game tokenizes answers, runs pretrained MiniLM inference on CPU, turns each answer into a sentence embedding and compares embeddings for semantic similarity.
+- **Fundamentals of Accelerated Data Science.** Match Insights organizes the five scores in a pandas DataFrame, calculates the change from a replacement answer, aggregates the average, minimum and maximum, and uses GroupBy to compare category averages. Tables and bars visualize the original and simulated results.
 
 ## Model and scoring
 
@@ -54,7 +57,7 @@ python -m pip install pytest==8.4.2
 python -m pytest -q
 ```
 
-The default tests cover the scoring math, invalid input, both modes, editing and inference-error recovery. Enable the real-model test with `MATCHLAB_TEST_MODEL=1` and rerun pytest. In PowerShell, set it with `$env:MATCHLAB_TEST_MODEL = '1'`. The real-model test checks repeatability and compares related and unrelated English answers.
+The default tests cover scoring, both modes, answer editing, inference recovery, simulator reset and the Match Insights calculations. Set `MATCHLAB_TEST_MODEL=1` and rerun pytest to check real MiniLM inference, tokenization and simulation. In PowerShell, use `$env:MATCHLAB_TEST_MODEL = '1'`.
 
 ## Deploy on Streamlit Community Cloud
 
@@ -69,4 +72,4 @@ In [Streamlit Community Cloud](https://share.streamlit.io/), choose **Create app
 
 ## About the project
 
-AI MatchLab is a student mini-project created to demonstrate what I learned from NVIDIA's Building Transformer-Based Natural Language Processing Applications course. It uses a pretrained Transformer model to compare the meanings of written answers.
+AI MatchLab is a student mini-project that brings together what I learned from both NVIDIA courses through a two-player game.

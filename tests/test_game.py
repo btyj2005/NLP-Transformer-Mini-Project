@@ -21,9 +21,14 @@ def test_game_navigation(mode, monkeypatch):
 
     def compare(left, right):
         received.append((left.copy(), right.copy()))
-        return MatchResult((0.8, 0.2, 0.4, 0.7, 0.5))
+        return MatchResult((0.8, 0.2, 0.4, 0.7, 0.5)), ([[1, 0]] * 5, [[0, 1]] * 5)
 
-    monkeypatch.setattr(nlp_model, "compare_answers", compare)
+    def encode_replacement(answers):
+        assert answers == ["My replacement answer."]
+        return [[1, 0]]
+
+    monkeypatch.setattr(nlp_model, "compare_round", compare)
+    monkeypatch.setattr(nlp_model, "answer_tokens", lambda _: [["[CLS]", "edited", "[SEP]"]] * 2)
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.radio[0].set_value(mode).run()
     click(app, "Start Game →")
@@ -67,6 +72,32 @@ def test_game_navigation(mode, monkeypatch):
     assert app.session_state.result.overall == 52
     assert received[0][0][0] == "My edited first answer."
     assert received[0][1][0] == "Player 2, answer 1."
+    original_answers = [answers.copy() for answers in app.session_state.answers]
+    original_result = app.session_state.result
+    monkeypatch.setattr(nlp_model, "encode_answers", encode_replacement)
+
+    app.selectbox(key="simulation_player").set_value(1).run()
+    app.selectbox(key="simulation_question").set_value(2).run()
+    click(app, "Try This Answer")
+    assert "short answer" in app.error[0].value
+    app.text_area(key="simulation_answer").set_value("My replacement answer.")
+    click(app, "Try This Answer")
+    assert app.session_state.simulation.similarities == (0.8, 0.2, 1, 0.7, 0.5)
+    assert app.session_state.simulation.overall == 64
+    assert [metric.value for metric in app.metric] == ["52.0%", "64.0%"]
+    assert len(app.table) == 2
+    assert app.session_state.answers == original_answers
+    assert app.session_state.result == original_result
+
+    app.selectbox(key="explanation_question").set_value(0).run()
+    assert not app.exception
+    assert app.metric[-1].value == "0.800"
+    click(app, "Reset simulation")
+    assert app.session_state.simulation is None
+    assert app.text_area(key="simulation_answer").value == ""
+    assert [metric.value for metric in app.metric] == ["0.800"]
+    assert app.session_state.answers == original_answers
+    assert app.session_state.result == original_result
     click(app, "Switch Mode")
     assert app.session_state.screen == "welcome"
     assert not any(any(player) for player in app.session_state.answers)
@@ -76,7 +107,7 @@ def test_failed_inference_preserves_answers_and_allows_retry(monkeypatch):
     def unavailable(*_answers):
         raise OSError("Model unavailable")
 
-    monkeypatch.setattr(nlp_model, "compare_answers", unavailable)
+    monkeypatch.setattr(nlp_model, "compare_round", unavailable)
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.session_state.screen = "ready"
     app.session_state.answers = [["A good answer."] * 5, ["Another answer."] * 5]
@@ -85,7 +116,7 @@ def test_failed_inference_preserves_answers_and_allows_retry(monkeypatch):
     assert "could not finish" in app.error[0].value
     assert app.session_state.result is None
     assert app.session_state.answers[0][0] == "A good answer."
-    monkeypatch.setattr(nlp_model, "compare_answers", lambda *_: MatchResult((0.5,) * 5))
+    monkeypatch.setattr(nlp_model, "compare_round", lambda *_: (MatchResult((0.5,) * 5), None))
     click(app, "Try AI analysis again")
     assert app.session_state.screen == "results"
     click(app, "Play Again")

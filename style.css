@@ -131,6 +131,15 @@ button[data-testid^="stBaseButton"] {
 .about-flow li::marker { color: var(--accent); font-weight: 700; }
 .st-key-about_topics summary { background: #fff; }
 .st-key-about_topics a { overflow-wrap: anywhere; }
+.st-key-results_tools summary { background: #f2edfb; }
+.st-key-results_tools details { border-color: #e4dcf3; }
+.st-key-results_tools [data-testid="stMetricDelta"] { white-space: normal; }
+.token-row, .embedding-flow { color: var(--ink); overflow-wrap: anywhere; }
+.token-row > div, .embedding-flow { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.token-row > div { margin-top: .3rem; }
+.token-row span, .embedding-flow span { padding: .25rem .55rem; border-radius: .55rem; background: #f2edfb; }
+.token-row span { font: .9rem ui-monospace, monospace; }
+.token-row span:nth-child(even), .embedding-flow span:nth-child(even) { background: #eaf1f9; }
 
 @media (max-width: 640px) {
     [data-testid="stMainBlockContainer"] { padding: 2.3rem 1rem 2rem; }

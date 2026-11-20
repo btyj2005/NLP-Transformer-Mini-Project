@@ -6,7 +6,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from nlp_model import MODEL_NAME, MODEL_URL, compare_answers
+from match_insights import category_averages, compare_scores, question_scores, score_statistics
+from nlp_model import MODEL_NAME, MODEL_URL, answer_tokens, compare_round, simulate_answer
 from questions import QUESTION_COUNT, QUESTIONS
 from scoring import MAX_ANSWER_LENGTH, AnswerError, MatchResult, clean_answer
 
@@ -19,7 +20,8 @@ state = st.session_state
 def new_round(screen="setup"):
     state.update(screen=screen, player=0, question=0,
                  answers=[[""] * QUESTION_COUNT for _ in range(2)],
-                 editing=False, error="", result=None)
+                 editing=False, error="", result=None, embeddings=None,
+                 simulation=None, simulation_error="")
 
 
 if "screen" not in state:
@@ -44,6 +46,8 @@ def open_view(view, draft=None):
         state.names = (state.setup_name_1.strip(), state.setup_name_2.strip())
     elif draft:
         state.answers[state.player][state.question] = state[draft]
+    if state.view == "game" and state.screen == "results":
+        reset_simulation()
     state.view = view
 
 
@@ -227,7 +231,7 @@ def analysis():
     st.markdown("## Comparing your answers")
     try:
         with st.spinner("Creating sentence embeddings. The first round may need to download the model…"):
-            state.result = compare_answers(*state.answers)
+            state.result, state.embeddings = compare_round(*state.answers)
     except AnswerError as error:
         state.update(screen="ready", error=f"Check your answers and try again. {error}")
         st.rerun()
@@ -257,8 +261,130 @@ def highlight(title, index, result: MatchResult, column):
                     st.caption("These two answers had the least aligned embeddings in this round. Read both to see where your answers took different directions.")
 
 
+def reset_simulation():
+    state.update(simulation=None, simulation_error="")
+    state.pop("simulation_answer", None)
+
+
+def run_simulation(player, question):
+    state.update(simulation=None, simulation_error="")
+    try:
+        with st.spinner("Comparing the replacement answer…"):
+            state.simulation = simulate_answer(
+                state.result, state.answers, state.get("embeddings"),
+                player, question, state.simulation_answer,
+            )
+    except AnswerError as error:
+        state.simulation_error = str(error)
+    except Exception:
+        state.simulation_error = "The model could not compare the answer. Please try again."
+
+
+def question_picker(label, key, index=0, on_change=None):
+    prompts = QUESTIONS[state.mode]
+    return st.selectbox(
+        label, range(QUESTION_COUNT), index=index, key=key, on_change=on_change,
+        format_func=lambda question: f"{question + 1}. {prompts[question][0]}",
+        placeholder="Choose one of your five questions",
+    )
+
+
+def simulation_insights(original, simulated, question):
+    result = state.result
+    comparison = compare_scores(original, simulated)
+    row = comparison.iloc[question]
+    before, after = result.similarities[question], simulated.similarities[question]
+    difference = round(simulated.overall - result.overall, 2) or 0
+    left, right = st.columns(2)
+    left.metric("Original match", f"{result.overall:.1f}%")
+    right.metric("Simulated match", f"{simulated.overall:.1f}%", f"{difference:+.2f} percentage points", delta_color="off")
+
+    st.markdown(f"**Question {question + 1} · {row['Question']}**")
+    for label in ("Original", "Simulated"):
+        score = row[label]
+        st.html(f'<div class="score-row"><p>{label} · {score:.1f}/100</p>'
+                f'{progress_bar(score, f"{label} question score")}</div>')
+    st.caption(f"Cosine similarity · Original {before:.3f} → Simulated {after:.3f}")
+
+    if after > before:
+        explanation = "The model found the replacement closer in meaning to the other player’s answer."
+    elif after < before:
+        explanation = "The model found the replacement farther in meaning from the other player’s answer."
+    else:
+        explanation = "The replacement produced the same similarity for this question."
+    if row["Change"] == 0 and before != after:
+        explanation += " Both cosine values map to the same game score."
+    st.write(explanation)
+    st.caption("The other four question scores stay the same.")
+
+    st.markdown("**Match Insights · scores out of 100**")
+    st.table(score_statistics(comparison[["Original", "Simulated"]]).style.format("{:.1f}"))
+    st.markdown("**Average by category**")
+    st.table(category_averages(comparison)[["Original", "Simulated"]].style.format("{:.1f}"))
+
+
+def what_if(original):
+    with st.expander("What If? 💭"):
+        st.caption("Try a different answer for one question. This experiment measures text similarity. Real-life compatibility can’t be predicted from these answers.")
+        names = state.names
+        player = st.selectbox(
+            "Choose a player", (0, 1), key="simulation_player", on_change=reset_simulation,
+            format_func=lambda index: f"Player {index + 1} · {names[index]}",
+        )
+        question = question_picker("Choose a question", "simulation_question", on_change=reset_simulation)
+        st.markdown("**Original answer**")
+        st.html(f'<div class="answer-quote">{escape(state.answers[player][question])}</div>')
+        with st.form("simulation_form", border=False, enter_to_submit=False):
+            st.text_area("Replacement answer", key="simulation_answer", max_chars=MAX_ANSWER_LENGTH, height=100)
+            if st.form_submit_button("Try This Answer", type="primary"):
+                run_simulation(player, question)
+        st.button("Reset simulation", on_click=reset_simulation)
+        if state.get("simulation_error"):
+            st.error(state.simulation_error)
+        if state.get("simulation") is not None:
+            simulation_insights(original, state.simulation, question)
+
+
+def explain_answer_comparison():
+    with st.expander("How did AI compare our answers? 🧠"):
+        question = question_picker("Explore a question", "explanation_question", index=None)
+        st.caption(f"Pretrained model · {MODEL_NAME}")
+        if question is None:
+            return
+        answers = [player[question] for player in state.answers]
+        st.markdown("**1. Original answers**")
+        cards = "".join(
+            f'<div><strong>{escape(name)}</strong><br>{escape(answer)}</div>'
+            for name, answer in zip(state.names, answers, strict=True)
+        )
+        st.html(f'<div class="example-pair">{cards}</div>')
+
+        st.markdown("**2. Tokenization**")
+        try:
+            tokens = answer_tokens(answers)
+        except Exception:
+            st.warning("The model tokenizer is temporarily unavailable.")
+        else:
+            st.caption("These are the actual tokens. [CLS] and [SEP] mark the answer’s boundaries.")
+            for name, pieces in zip(state.names, tokens, strict=True):
+                pills = "".join(f'<span>{escape(piece)}</span>' for piece in pieces)
+                st.html(f'<div class="token-row"><strong>{escape(name)}</strong><div>{pills}</div></div>')
+
+        st.markdown("**3. Sentence embeddings**")
+        st.write("The Transformer converts each sentence into a list of numbers that represents its meaning.")
+        st.html('<div class="embedding-flow"><span>Answer</span> → <span>MiniLM</span> → <span>384 numbers</span></div>')
+        st.markdown("**4. Cosine similarity**")
+        st.write("AI compares the two sets of numbers to see how similar the sentences are. It checks how closely the two embeddings point in the same direction.")
+        cosine = state.result.similarities[question]
+        st.metric("Cosine similarity (−1 to 1)", f"{cosine:.3f}")
+        st.markdown("**5. What this comparison means**")
+        st.write(f"The cosine value becomes {state.result.scores[question]:.1f}/100 for this question. Scores closer to 100 indicate more alignment between the two answers in the model.")
+        st.caption("Similarity and agreement can differ. ‘I love gaming’ and ‘I hate gaming’ share a topic and express opposite opinions.")
+
+
 def results():
     result = state.result
+    original = question_scores(state.mode, result)
     left, right = (escape(name) for name in state.names)
     title = "On the same wavelength" if result.overall >= 65 else (
         "A little overlap, a little surprise" if result.overall >= 35 else "Lots to swap stories about"
@@ -270,7 +396,7 @@ def results():
         <div><h2>{left} &amp; {right}</h2><p>{title}</p></div>
         </div>''')
     st.markdown("## Vibe breakdown")
-    for index, ((prompt, _), score) in enumerate(zip(QUESTIONS[state.mode], result.scores, strict=True)):
+    for index, (prompt, score) in enumerate(original[["Question", "Original"]].itertuples(index=False, name=None)):
         label = f"{index + 1}. {prompt} · {score:.1f}/100"
         st.html(f'<div class="score-row"><p>{escape(label)}</p>'
                 f'{progress_bar(score, prompt)}</div>')
@@ -280,6 +406,9 @@ def results():
     highlight("Your Biggest Match", result.biggest_match, result, left)
     highlight("Your Biggest Difference", result.biggest_difference, result, right)
     st.caption("This entertainment score measures text similarity. The model can miss negation, context and tone. Your friendship or relationship can’t be measured by five answers.")
+    with st.container(key="results_tools"):
+        what_if(original)
+        explain_answer_comparison()
     again, switch = st.columns(2)
     again.button("Play Again", type="primary", width="stretch", on_click=new_round)
     switch.button("Switch Mode", width="stretch", on_click=new_round, args=("welcome",))
@@ -337,8 +466,12 @@ def about():
     st.html('''<div class="example-pair"><div><strong>Person A</strong><br>I love watching movies.</div>
         <div><strong>Person B</strong><br>I enjoy films.</div></div>''')
     st.caption("Different words can point to the same idea. Both answers are about enjoying movies.")
+    st.markdown("## Explore your results")
+    st.markdown("**What If? Simulator** · Change an answer and see how it affects the AI similarity score.")
+    st.markdown("**How AI Compared Our Answers** · See how the Transformer processes sentences and compares their meanings.")
+    st.markdown("**Match Insights** · pandas puts the five scores in a table. Aggregation finds the average, lowest and highest scores. GroupBy gathers questions by topic so you can compare category averages. The bars show how the original and simulated question scores compare.")
     st.markdown("## About the project")
-    st.write("Bryan Tock built AI MatchLab as an independent mini-project while studying for a Diploma in Applied AI & Analytics at Republic Polytechnic. It applies concepts from NVIDIA’s Building Transformer-Based Natural Language Processing Applications certification.")
+    st.write("Bryan Tock built AI MatchLab as an independent mini-project while studying for a Diploma in Applied AI & Analytics at Republic Polytechnic. It applies concepts from NVIDIA’s Building Transformer-Based Natural Language Processing Applications and Fundamentals of Accelerated Data Science certifications.")
     st.button("← Back to Home", on_click=open_view, args=("home",))
 
 

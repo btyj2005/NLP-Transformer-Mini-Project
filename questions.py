@@ -18,3 +18,9 @@ QUESTIONS = {
 }
 
 QUESTION_COUNT = 5
+
+# One category per prompt, in the same order as QUESTIONS.
+QUESTION_CATEGORIES = {
+    "Bestie Mode": ("Everyday life", "Everyday life", "Experiences", "Experiences", "Connection"),
+    "Couple Mode": ("Experiences", "Everyday life", "Connection", "Experiences", "Connection"),
+}
