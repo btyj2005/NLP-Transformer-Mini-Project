@@ -59,21 +59,6 @@ def header(draft=None):
                 button(label, key=key, type="tertiary", on_click=open_view, args=(destination, draft))
 
 
-def track_scene(screen):
-    """Give each visit a stable key and keep the previous question's progress."""
-    question = state.player * QUESTION_COUNT + state.question + 1 if screen == "question" else 0
-    previous_screen, previous_step, revision, origin = state.get("scene", ("", 0, 0, 0))
-    if (screen, question) != (previous_screen, previous_step):
-        origin = previous_step if previous_screen == screen == "question" else question
-        state.scene = (screen, question, revision + 1, origin)
-
-
-def scene_key(prefix):
-    visit = state.scene[2]
-    variant = "odd" if visit % 2 else "even"
-    return f"{prefix}_{variant}_{visit}"
-
-
 def welcome():
     left, right = st.columns([1.15, 1], vertical_alignment="center", gap="small")
     with left:
@@ -101,18 +86,17 @@ def welcome():
     st.html('<p class="center muted fine">An AI-powered game for entertainment and conversation.</p>')
 
 
-def stage_label(text, animate=False):
+def stage_label(text):
     mode_class = "couple" if state.mode == "Couple Mode" else "bestie"
     symbol = "♡" if mode_class == "couple" else "✦"
     st.html(f'<div class="stage-label {mode_class}"><span aria-hidden="true">{symbol}</span> '
-            f'{state.mode}<span class="stage-detail{" step-enter" if animate else ""}">{escape(text)}</span></div>')
+            f'{state.mode}<span class="stage-detail">{escape(text)}</span></div>')
 
 
-def progress_bar(value, label, *, previous=0, delay=0):
-    """Animate the fill independently of its accessible, final value."""
+def progress_bar(value, label):
     return (f'<div class="track" role="progressbar" aria-label="{escape(label)}" '
             f'aria-valuenow="{value:.1f}" aria-valuemin="0" aria-valuemax="100">'
-            f'<span style="--from:{previous / 100:.6f};--to:{value / 100:.6f};--delay:{delay}ms"></span></div>')
+            f'<span style="width:{value:.6f}%"></span></div>')
 
 
 def save_names(destination):
@@ -127,9 +111,8 @@ def setup():
     state.setup_name_1, state.setup_name_2 = state.names
     with st.form("player_setup_form", border=False, enter_to_submit=False):
         header("setup")
-        with st.container(key=scene_key("scene_setup")):
-            stage_label("Player setup")
-            setup_fields()
+        stage_label("Player setup")
+        setup_fields()
 
 
 def setup_fields():
@@ -177,15 +160,15 @@ def question_screen():
     widget_key = f"answer_{player}_{index}"
     # The game owns drafts even after Streamlit removes old form widgets.
     state[widget_key] = state.answers[player][index]
-    _, step, _, previous = state.scene
+    step = player * QUESTION_COUNT + index + 1
     theme = "couple" if state.mode == "Couple Mode" else "bestie"
-    with st.form(f"question_{player}_{index}", border=False, enter_to_submit=False):
+    # Keep the form, card and native progress bar mounted between questions.
+    with st.form("question_form", border=False, enter_to_submit=False):
         header(widget_key)
-        with st.container(key=scene_key(f"question_motion_{theme}")):
+        with st.container(key=f"question_stage_{theme}"):
             status = f"Player {player + 1} of 2 · Question {index + 1} of {QUESTION_COUNT}"
-            stage_label(status, animate=True)
-            total = 2 * QUESTION_COUNT
-            st.html(progress_bar(100 * step / total, "Round progress", previous=100 * previous / total))
+            stage_label(status)
+            st.progress(step / (2 * QUESTION_COUNT))
             question_fields(player, index, prompt, hint, widget_key)
         st.html('<p class="center muted fine">Keep your screen to yourself while you answer.</p>')
 
@@ -200,10 +183,10 @@ def question_fields(player, index, prompt, hint, widget_key):
             placeholder="Write one or two short sentences in English…", height=115,
         )
         left, right = st.columns(2)
-        left.form_submit_button("← Back", width="stretch", on_click=save_answer,
+        left.form_submit_button("← Back", key=f"back_{widget_key}", width="stretch", on_click=save_answer,
                                 args=(player, index, widget_key, False))
         label = "Finish turn →" if index == QUESTION_COUNT - 1 else "Next →"
-        right.form_submit_button(label, type="primary", width="stretch",
+        right.form_submit_button(label, key=f"advance_{widget_key}", type="primary", width="stretch",
                                  on_click=save_answer, args=(player, index, widget_key, True))
         if state.error:
             st.error(state.error)
@@ -285,13 +268,12 @@ def results():
     st.html(f'''<div class="score-panel {theme}">
         <div><p class="score-label">Your Match Score</p><p class="score-number">{result.overall:.1f}<small> / 100</small></p></div>
         <div><h2>{left} &amp; {right}</h2><p>{title}</p></div>
-        <span class="score-sparkles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
         </div>''')
     st.markdown("## Vibe breakdown")
     for index, ((prompt, _), score) in enumerate(zip(QUESTIONS[state.mode], result.scores, strict=True)):
         label = f"{index + 1}. {prompt} · {score:.1f}/100"
         st.html(f'<div class="score-row"><p>{escape(label)}</p>'
-                f'{progress_bar(score, prompt, delay=index * 35)}</div>')
+                f'{progress_bar(score, prompt)}</div>')
     if result.biggest_match == result.biggest_difference:
         st.caption("All five cosine scores tied. Both highlights show the first question.")
     left, right = st.columns(2)
@@ -361,17 +343,12 @@ def about():
 
 
 screen = {"home": "welcome", "about": "about"}.get(state.view, state.screen)
-track_scene(screen)
 if screen not in {"setup", "question"}:
     header()
 render = {
     "welcome": welcome, "about": about, "setup": setup, "question": question_screen,
     "handoff": handoff, "ready": ready, "analysis": analysis, "results": results,
 }[screen]
-if screen in {"welcome", "about", "results"}:
-    with st.container(key=scene_key(f"scene_{screen}")):
-        render()
-else:
-    render()
+render()
 if screen != "about":
     how_ai_works()

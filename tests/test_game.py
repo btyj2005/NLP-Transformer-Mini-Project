@@ -103,9 +103,8 @@ def test_header_navigation_saves_unsubmitted_drafts():
     assert [entry.value for entry in app.text_input] == ["Alex", "Jordan"]
 
     click(app, "Continue →")
-    first_scene = app.session_state.scene
     click(app, "Next →")
-    assert app.session_state.scene == first_scene
+    assert (app.session_state.player, app.session_state.question) == (0, 0)
 
     app.text_area[0].set_value("A draft worth keeping.")
     click(app, "About")
@@ -116,9 +115,7 @@ def test_header_navigation_saves_unsubmitted_drafts():
     click(app, "Resume round →")
     assert app.text_area[0].value == "A draft worth keeping."
     click(app, "Next →")
-    _, step, _, previous = app.session_state.scene
-    assert (previous, step) == (1, 2)
+    assert app.session_state.question == 1
     click(app, "← Back")
-    _, step, _, previous = app.session_state.scene
-    assert (previous, step) == (2, 1)
+    assert app.session_state.question == 0
     assert app.text_area[0].value == "A draft worth keeping."
