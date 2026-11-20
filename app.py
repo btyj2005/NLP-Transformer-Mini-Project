@@ -6,7 +6,10 @@ from pathlib import Path
 
 import streamlit as st
 
-from match_insights import category_averages, compare_scores, question_scores, score_statistics
+from match_insights import (
+    CHANGE_COLORS, ORIGINAL_COLOR, category_averages, change_label, compare_scores,
+    comparison_chart, comparison_table, question_scores, score_statistics,
+)
 from nlp_model import MODEL_NAME, MODEL_URL, answer_tokens, compare_round, simulate_answer
 from questions import QUESTION_COUNT, QUESTIONS
 from scoring import MAX_ANSWER_LENGTH, AnswerError, MatchResult, clean_answer
@@ -291,19 +294,26 @@ def question_picker(label, key, index=0, on_change=None):
 def simulation_insights(original, simulated, question):
     result = state.result
     comparison = compare_scores(original, simulated)
-    row = comparison.iloc[question]
     before, after = result.similarities[question], simulated.similarities[question]
-    difference = round(simulated.overall - result.overall, 2) or 0
+    difference = change_label(simulated.overall - result.overall)
     left, right = st.columns(2)
     left.metric("Original match", f"{result.overall:.1f}%")
-    right.metric("Simulated match", f"{simulated.overall:.1f}%", f"{difference:+.2f} percentage points", delta_color="off")
+    right.metric("Simulated match", f"{simulated.overall:.1f}%", f"{difference} percentage points",
+                 delta_color="off", delta_arrow="off")
 
-    st.markdown(f"**Question {question + 1} · {row['Question']}**")
-    for label in ("Original", "Simulated"):
-        score = row[label]
-        st.html(f'<div class="score-row"><p>{label} · {score:.1f}/100</p>'
-                f'{progress_bar(score, f"{label} question score")}</div>')
-    st.caption(f"Cosine similarity · Original {before:.3f} → Simulated {after:.3f}")
+    st.markdown("**Similarity scores by question**")
+    legend = {"Original": ORIGINAL_COLOR, **CHANGE_COLORS}
+    items = "".join(f'<span><i style="background:{color}" aria-hidden="true"></i>{label}</span>'
+                    for label, color in legend.items())
+    st.html(f'<div class="simulation-legend">{items}</div>')
+    st.caption("* Modified question · pp means percentage points")
+    st.plotly_chart(comparison_chart(comparison, question), theme=None, width="stretch",
+                    config={"displayModeBar": False, "scrollZoom": False})
+
+    st.markdown("**Question comparison**")
+    with st.container(key="simulation_table"):
+        st.table(comparison_table(comparison, question))
+    st.caption(f"Question {question + 1} cosine similarity · Original {before:.3f} → Simulated {after:.3f}")
 
     if after > before:
         explanation = "The model found the replacement closer in meaning to the other player’s answer."
@@ -311,7 +321,7 @@ def simulation_insights(original, simulated, question):
         explanation = "The model found the replacement farther in meaning from the other player’s answer."
     else:
         explanation = "The replacement produced the same similarity for this question."
-    if row["Change"] == 0 and before != after:
+    if comparison.at[question, "Change"] == 0 and before != after:
         explanation += " Both cosine values map to the same game score."
     st.write(explanation)
     st.caption("The other four question scores stay the same.")

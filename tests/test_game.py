@@ -85,7 +85,8 @@ def test_game_navigation(mode, monkeypatch):
     assert app.session_state.simulation.similarities == (0.8, 0.2, 1, 0.7, 0.5)
     assert app.session_state.simulation.overall == 64
     assert [metric.value for metric in app.metric] == ["52.0%", "64.0%"]
-    assert len(app.table) == 2
+    assert len(app.get("plotly_chart")) == 1
+    assert len(app.table) == 3
     assert app.session_state.answers == original_answers
     assert app.session_state.result == original_result
 
@@ -95,6 +96,8 @@ def test_game_navigation(mode, monkeypatch):
     click(app, "Reset simulation")
     assert app.session_state.simulation is None
     assert app.text_area(key="simulation_answer").value == ""
+    assert not app.get("plotly_chart")
+    assert not app.table
     assert [metric.value for metric in app.metric] == ["0.800"]
     assert app.session_state.answers == original_answers
     assert app.session_state.result == original_result

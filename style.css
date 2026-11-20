@@ -134,6 +134,11 @@ button[data-testid^="stBaseButton"] {
 .st-key-results_tools summary { background: #f2edfb; }
 .st-key-results_tools details { border-color: #e4dcf3; }
 .st-key-results_tools [data-testid="stMetricDelta"] { white-space: normal; }
+.simulation-legend { display: flex; flex-wrap: wrap; gap: .35rem 1rem; font-size: .85rem; }
+.simulation-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.simulation-legend i { width: .7rem; height: .7rem; border-radius: .2rem; }
+.st-key-simulation_table tr > th:first-child { display: none; }
+.st-key-simulation_table th, .st-key-simulation_table td { white-space: normal; }
 .token-row, .embedding-flow { color: var(--ink); overflow-wrap: anywhere; }
 .token-row > div, .embedding-flow { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
 .token-row > div { margin-top: .3rem; }
@@ -142,6 +147,16 @@ button[data-testid^="stBaseButton"] {
 .token-row span:nth-child(even), .embedding-flow span:nth-child(even) { background: #eaf1f9; }
 
 @media (max-width: 640px) {
+    .st-key-simulation_table table { table-layout: fixed; }
+    .st-key-simulation_table [data-testid="stTable"] :is(th, td) {
+        padding: .35rem .2rem; font-size: .72rem; line-height: 1.35;
+        overflow-wrap: anywhere; word-break: normal;
+    }
+    .st-key-simulation_table th:nth-child(2) { width: 28%; }
+    .st-key-simulation_table th:nth-child(3) { width: 20%; }
+    .st-key-simulation_table th:nth-child(4) { width: 17%; }
+    .st-key-simulation_table th:nth-child(5) { width: 19%; }
+    .st-key-simulation_table th:nth-child(6) { width: 16%; }
     [data-testid="stMainBlockContainer"] { padding: 2.3rem 1rem 2rem; }
     .hero-copy { padding: .65rem 0 0; }
     .hero-art { max-width: 16rem; margin-inline: auto; }

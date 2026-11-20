@@ -4,5 +4,6 @@ torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.8.0%2Bcpu-cp311-cp311-ma
 torch==2.8.0 ; sys_platform == "darwin" and platform_machine == "arm64"
 streamlit==1.52.2
 pandas==2.3.3
+plotly==6.5.2
 sentence-transformers==5.2.0
 transformers==4.57.6
