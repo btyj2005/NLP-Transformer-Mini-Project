@@ -15,7 +15,7 @@ AI MatchLab is a two-player Streamlit game and student portfolio project. Friend
 - Each player answers privately on the same device. A handoff screen keeps the outgoing player’s answers out of view. Both players can revisit and edit their own answers before comparing.
 - The results show all five scores and the questions with the highest and lowest cosine values. Open a highlight together to read the two answers side by side.
 - **About** explains NLP, Transformers, BERT and the MiniLM model behind the game. The AI MatchLab header button returns home, where you can resume a round with your draft intact.
-- The question card stays visible as you move through the round. The progress bar and hover effects respect your device’s reduced-motion preference.
+- The question card stays visible as you move through the round, and the progress bar updates in a single step.
 
 ![AI MatchLab results with a real model score and five question scores using fictional answers](assets/results.webp)
 

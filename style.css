@@ -5,7 +5,6 @@
     --accent: #6045a1;
     --line: #ded7e5;
     --display: Georgia, 'Times New Roman', serif;
-    --ease-out: cubic-bezier(.22, .72, .28, 1);
 }
 
 [data-testid="stHeader"] { background: transparent; }
@@ -13,6 +12,8 @@
 [data-testid="stHeader"] :is(button, a) { pointer-events: auto; }
 [data-testid="stAppDeployButton"] { display: none; }
 [data-testid="stMainBlockContainer"] { max-width: 67rem; padding: 2.5rem 2.25rem 3rem; }
+/* Keep the current panel visible while Streamlit replaces stale elements. */
+.stMain [data-testid="stElementContainer"][data-stale="true"] { opacity: 1; transition: none; }
 .stApp h1, .stApp h2, .stApp h3 { font-family: var(--display); color: var(--ink); }
 .stApp h2 { letter-spacing: -.022em; }
 .stApp h3 { padding-top: .2rem; }
@@ -44,7 +45,7 @@
 .st-key-mode_picker label[data-baseweb="radio"] {
     align-items: center; gap: .6rem; margin: 0; min-height: 5.1rem; padding: .85rem 1.1rem;
     border: 1px solid var(--line); border-radius: 1rem; background: #fff;
-    box-shadow: 0 .2rem .9rem #30204408; transition: border-color .16s, background-color .16s, transform .16s;
+    box-shadow: 0 .2rem .9rem #30204408;
     cursor: pointer;
 }
 .st-key-mode_picker label[data-baseweb="radio"]:has(input:checked) { border-color: var(--accent); background: #f0ebfc; }
@@ -56,7 +57,7 @@
 .st-key-start_game { max-width: 20rem; margin-inline: auto; }
 button[data-testid^="stBaseButton"] {
     border-radius: .75rem; min-height: 2.8rem;
-    transition: background-color .15s, border-color .15s, color .15s;
+    transition: none;
 }
 :is(button[data-testid^="stBaseButton"], .st-key-about_topics summary):focus-visible {
     outline: 2px solid var(--accent); outline-offset: 3px;
@@ -77,7 +78,6 @@ button[data-testid^="stBaseButton"] {
     :is(button[data-testid="stBaseButton-secondary"], button[data-testid="stBaseButton-secondaryFormSubmit"]):enabled:hover {
         background: #f8f4fb; border-color: #b9a9ce; color: var(--plum);
     }
-    .st-key-mode_picker label[data-baseweb="radio"]:hover { transform: translateY(-1px); }
     .st-key-mode_picker label[data-baseweb="radio"]:not(:has(input:checked)):hover { border-color: #ad9ac8; }
     .st-key-about_topics summary:hover { background: #faf7fd; }
 }
@@ -99,7 +99,7 @@ button[data-testid^="stBaseButton"] {
 .st-key-question_stage_bestie [data-baseweb="progress-bar"] > div > div > div,
 .st-key-question_stage_couple [data-baseweb="progress-bar"] > div > div > div {
     background: linear-gradient(90deg, var(--accent), var(--question-progress-end));
-    transition: transform .26s var(--ease-out);
+    transition: none;
 }
 .track { height: .48rem; border-radius: 99px; overflow: hidden; background: #ece6f2; }
 .track > span {
@@ -129,7 +129,7 @@ button[data-testid^="stBaseButton"] {
 .about-flow li { padding: .7rem; border-radius: .7rem; background: #f2edfb; font-size: .9rem; }
 .about-flow li:nth-child(even) { background: #eaf1f9; }
 .about-flow li::marker { color: var(--accent); font-weight: 700; }
-.st-key-about_topics summary { background: #fff; transition: background-color .15s; }
+.st-key-about_topics summary { background: #fff; }
 .st-key-about_topics a { overflow-wrap: anywhere; }
 
 @media (max-width: 640px) {
@@ -146,5 +146,4 @@ button[data-testid^="stBaseButton"] {
     .stApp *, .stApp *::before, .stApp *::after {
         animation: none !important; transition: none !important; scroll-behavior: auto !important;
     }
-    .st-key-mode_picker label[data-baseweb="radio"]:hover { transform: none; }
 }
