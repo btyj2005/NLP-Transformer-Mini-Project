@@ -262,8 +262,7 @@ def highlight(title, index, result: MatchResult, column):
 
 
 def reset_simulation():
-    state.update(simulation=None, simulation_error="")
-    state.pop("simulation_answer", None)
+    state.update(simulation=None, simulation_error="", simulation_answer="")
 
 
 def run_simulation(player, question):
