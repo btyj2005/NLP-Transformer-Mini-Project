@@ -2,6 +2,8 @@
 
 **Discover how well your vibes match.**
 
+[Play AI MatchLab on Streamlit Community Cloud](https://btyj2005-nlp-transformer-mini-project-app-d2788k.streamlit.app/)
+
 AI MatchLab is a two-player Streamlit game and student portfolio project. Friends or partners take turns answering five open-ended questions, then see how closely a pretrained language model groups their answers.
 
 ![AI MatchLab welcome screen showing Bestie and Couple modes](assets/welcome.webp)
