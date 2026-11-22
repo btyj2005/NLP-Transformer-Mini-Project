@@ -51,6 +51,55 @@ def test_server_authorization(configure, monkeypatch, identity, allowed):
     with pytest.raises(expected):
         analytics.read_events(None, datetime.now(timezone.utc))
     assert accesses == (["test"] if allowed else [])
+    if not allowed:
+        with pytest.raises(PermissionError):
+            analytics.check_connections()
+        assert accesses == []
+
+
+def test_missing_user_agent_still_tracks_visit(configure, monkeypatch):
+    monkeypatch.setattr(analytics.st, "user", User())
+    monkeypatch.setattr(analytics.st.context.__class__, "headers", property(lambda _: {}))
+    monkeypatch.setattr(analytics, "connect", lambda _: (_ for _ in ()).throw(psycopg.OperationalError()))
+    app = AppTest.from_file(str(APP)).run().run()
+    assert not app.exception
+    assert [row[0] for row in app.session_state.analytics_pending.values()] == ["visit"]
+
+
+@pytest.mark.parametrize("driver_message,code", [
+    ("FATAL: Tenant or user not found", "POOLER_ROUTE"),
+    ("FATAL: password authentication failed", "LOGIN_REJECTED"),
+    ("SSL error: certificate verify failed", "TLS"),
+    ("timeout expired", "UNREACHABLE"),
+])
+def test_connection_errors_report_safe_codes(monkeypatch, driver_message, code):
+    def fail(*args, **kwargs):
+        assert kwargs["sslmode"] == "verify-full"
+        assert kwargs["sslrootcert"] == "system"
+        assert kwargs["connect_timeout"] == 5
+        raise psycopg.OperationalError(f"{driver_message} host=private.example password=private")
+
+    monkeypatch.setattr(analytics.psycopg, "connect", fail)
+    with pytest.raises(analytics.AnalyticsDatabaseError) as detail:
+        with analytics.connect("host=private.example user=matchlab_writer password=private"):
+            pytest.fail("Unexpected connection")
+    assert str(detail.value) == code
+    assert detail.value.__suppress_context__
+
+
+def test_dashboard_reports_reader_and_writer_independently(configure, monkeypatch):
+    monkeypatch.setattr(analytics.st, "user", User(
+        iss=configure, sub=analytics.GITHUB_SUBJECT, exp=4102444800,
+    ))
+    monkeypatch.setattr(analytics, "settings", lambda _: {
+        "issuer": configure, "write_dsn": "bad=private-password",
+    })
+    app = AppTest.from_file(str(APP)).run()
+    click(app, "Owner Analytics")
+    click(app, "Check reader and writer")
+    assert all("private-password" not in item.value for item in [*app.error, *app.warning])
+    assert "owner_analytics.read_dsn · MISSING_SETTING" in app.error[0].value
+    assert any("owner_analytics.write_dsn · INVALID_DSN" in item.value for item in app.warning)
 
 
 @pytest.mark.parametrize("tag,source", [("linkedin", "LinkedIn"), ("GitHub", "GitHub"),

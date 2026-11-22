@@ -9,12 +9,31 @@ import plotly.graph_objects as go
 import psycopg
 import streamlit as st
 
-from owner_analytics import DIRECT, MODES, SOURCES, is_owner, read_events
+from owner_analytics import (
+    DIRECT, MODES, SOURCES, AnalyticsDatabaseError, check_connections,
+    failure_code, is_owner, read_events,
+)
 
 SGT = ZoneInfo("Asia/Singapore")
 PERIODS = {"Today": 1, "Last 7 Days": 7, "Last 30 Days": 30, "All Time": None}
 COLORS = ["#6958a6", "#557797", "#bb6a72"]
 COLUMNS = ("kind", "session_id", "mode", "source", "occurred_at", "completed")
+CONNECTION_HELP = {
+    "MISSING_SETTING": "Add this key under [owner_analytics] in Streamlit Secrets.",
+    "INVALID_DSN": "Use a quoted PostgreSQL connection string with an explicit host and user.",
+    "POOLER_ROUTE": "Copy the Session pooler host and project ref from the same Supabase Connect dialog. Use ROLE.PROJECT_REF on port 5432.",
+    "LOGIN_REJECTED": "Check that the role can log in and use that role's database password.",
+    "TLS": "Check the exact Session pooler host. For certificate trust errors, add the Supabase CA as owner_analytics.ssl_root_cert_pem.",
+    "INVALID_CA": "Paste the complete Supabase PEM certificate into owner_analytics.ssl_root_cert_pem.",
+    "UNREACHABLE": "Check the Session pooler host, port 5432, project status and database network restrictions.",
+    "WRONG_ROLE": "Use the restricted matchlab_writer or matchlab_reader role for its respective key.",
+    "ACCESS_DENIED": "Check the schema usage grant, table grant and role policy in the analytics migration.",
+    "SCHEMA_MISSING": "Check that this connection targets the Supabase project where the analytics migration ran.",
+    "SCHEMA_MISMATCH": "Check the table columns against the analytics migration.",
+    "READER_POLICY": "Check that RLS is enabled and the migration's matchlab_read SELECT policy is in effect.",
+    "QUERY_TIMEOUT": "The database connected, but the query timed out. Check for locks or Supabase load.",
+    "DATABASE_ERROR": "The database operation failed. Check the Supabase Postgres logs for this time.",
+}
 CSS = """
 <style>
 .matchlab-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; }
@@ -80,12 +99,27 @@ def render_dashboard():
     st.title("AI MatchLab — Owner Analytics")
     period = st.selectbox("Date range · Singapore time", list(PERIODS), index=2)
     st.button("Refresh Analytics", icon=":material/refresh:")
+    with st.expander("Database diagnostics"):
+        st.caption("Tests both connections. The writer test rolls back its event.")
+        if st.button("Check reader and writer"):
+            for key, code in check_connections().items():
+                if code == "OK":
+                    st.success(f"owner_analytics.{key} · OK")
+                else:
+                    st.warning(f"owner_analytics.{key} · {code}. {CONNECTION_HELP[code]}")
     now = datetime.now(SGT)
     start, end = date_window(period, now)
     try:
         visits, sessions, traffic, daily, modes = summarize(read_events(start, end), start, end)
-    except (psycopg.Error, RuntimeError, ValueError, PermissionError):
-        st.error("Analytics could not load. Check the database configuration or try refreshing.")
+    except (psycopg.Error, AnalyticsDatabaseError) as error:
+        code = failure_code(error)
+        st.error(f"Analytics could not load. owner_analytics.read_dsn · {code}. {CONNECTION_HELP[code]}")
+        return
+    except PermissionError:
+        st.error("Owner authentication is required.")
+        return
+    except (RuntimeError, ValueError):
+        st.error("Analytics could not load. The database results could not be summarized.")
         return
 
     st.caption(f"Last updated {datetime.now(SGT):%d %b %Y, %I:%M:%S %p} SGT")

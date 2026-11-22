@@ -2,16 +2,56 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from logging import getLogger
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import monotonic
 from uuid import uuid4
 
 import psycopg
 import streamlit as st
+from psycopg.conninfo import conninfo_to_dict
 
 GITHUB_SUBJECT = "github|247741615"
 SOURCES = {"linkedin": "LinkedIn", "github": "GitHub"}
 DIRECT = "Direct / Other"
 MODES = ("Bestie Mode", "Couple Mode")
+LOGGER = getLogger(__name__)
+INSERT_EVENT = """INSERT INTO matchlab_analytics.events
+    (kind, scope_id, session_id, round_id, mode, source, occurred_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT DO NOTHING"""
+
+
+class AnalyticsDatabaseError(RuntimeError):
+    """Carries a fixed diagnostic code suitable for the owner UI and server logs."""
+
+
+def failure_code(error):
+    if isinstance(error, AnalyticsDatabaseError):
+        return str(error)
+    return {
+        "42501": "ACCESS_DENIED",
+        "42P01": "SCHEMA_MISSING",
+        "3F000": "SCHEMA_MISSING",
+        "42703": "SCHEMA_MISMATCH",
+        "57014": "QUERY_TIMEOUT",
+    }.get(getattr(error, "sqlstate", None), "DATABASE_ERROR")
+
+
+def connection_failure(error):
+    # libpq often supplies no SQLSTATE during startup. Match known messages
+    # locally and never return or log any part of the original driver message.
+    message = str(error).casefold()
+    if "tenant or user not found" in message or "tenant/user" in message:
+        return "POOLER_ROUTE"
+    if "certificate" in message or "ssl" in message or "tls" in message:
+        return "TLS"
+    if (getattr(error, "sqlstate", None) in {"28P01", "28000"}
+            or "authentication failed" in message or "eauthquery" in message
+            or ("role" in message and "does not exist" in message)):
+        return "LOGIN_REJECTED"
+    return "UNREACHABLE"
 
 
 def settings(section):
@@ -52,7 +92,7 @@ def initialize_visit():
     headers = st.context.headers
     agent = headers.get("User-Agent", "").lower()
     purpose = (headers.get("Sec-Purpose", "") + headers.get("Purpose", "")).lower()
-    if not agent or "prefetch" in purpose or any(
+    if "prefetch" in purpose or any(
         marker in agent for marker in ("bot", "crawler", "spider", "headlesschrome")
     ):
         return
@@ -78,11 +118,96 @@ def record(kind, round_id=None, mode=None):
 
 
 @contextmanager
-def connect(dsn):
-    with psycopg.connect(dsn, connect_timeout=2, sslmode="verify-full",
-                         prepare_threshold=None) as conn:
+def connect(dsn, ca_path=None):
+    try:
+        options = conninfo_to_dict(dsn)
+    except (psycopg.Error, TypeError, ValueError):
+        raise AnalyticsDatabaseError("INVALID_DSN") from None
+    if not options.get("host") or not options.get("user"):
+        raise AnalyticsDatabaseError("INVALID_DSN")
+    try:
+        conn = psycopg.connect(
+            dsn, connect_timeout=5, sslmode="verify-full",
+            sslrootcert=ca_path or options.get("sslrootcert") or "system",
+            prepare_threshold=None,
+        )
+    except psycopg.Error as error:
+        raise AnalyticsDatabaseError(connection_failure(error)) from None
+    with conn:
         conn.execute("SET LOCAL statement_timeout = '2500ms'")
         yield conn
+
+
+@contextmanager
+def database_connection(key):
+    config = settings("owner_analytics")
+    dsn, ca = config.get(key), config.get("ssl_root_cert_pem")
+    if not dsn:
+        raise AnalyticsDatabaseError("MISSING_SETTING")
+    if not isinstance(dsn, str):
+        raise AnalyticsDatabaseError("INVALID_DSN")
+    if ca is None:
+        with connect(dsn) as conn:
+            yield conn
+        return
+    if not isinstance(ca, str) or not ca.strip().startswith("-----BEGIN CERTIFICATE-----"):
+        raise AnalyticsDatabaseError("INVALID_CA")
+    try:
+        with TemporaryDirectory(prefix="matchlab-ca-") as folder:
+            path = Path(folder) / "root.crt"
+            path.write_text(ca, encoding="ascii")
+            with connect(dsn, str(path)) as conn:
+                yield conn
+    except (OSError, UnicodeError):
+        raise AnalyticsDatabaseError("INVALID_CA") from None
+
+
+def check_role(conn, role):
+    matches = conn.execute(
+        """SELECT current_user = %s AND NOT (rolsuper OR rolbypassrls)
+           FROM pg_catalog.pg_roles WHERE rolname = current_user""",
+        (role,),
+    ).fetchone()
+    if matches != (True,):
+        raise AnalyticsDatabaseError("WRONG_ROLE")
+
+
+def check_reader_policy(conn):
+    if conn.execute(
+        """SELECT row_security_active('matchlab_analytics.events'),
+                  EXISTS (
+                      SELECT 1 FROM pg_catalog.pg_policies
+                      WHERE schemaname = 'matchlab_analytics' AND tablename = 'events'
+                        AND policyname = 'matchlab_read' AND cmd = 'SELECT'
+                        AND current_user = ANY(roles) AND qual = 'true'
+                  )"""
+    ).fetchone() != (True, True):
+        raise AnalyticsDatabaseError("READER_POLICY")
+
+
+def check_connections():
+    """Probe both roles on demand. The writer's test event is rolled back."""
+    if not is_owner():
+        raise PermissionError("Owner authentication required.")
+    results = {}
+    for key, role in (("write_dsn", "matchlab_writer"), ("read_dsn", "matchlab_reader")):
+        try:
+            with database_connection(key) as conn:
+                check_role(conn, role)
+                if key == "write_dsn":
+                    session = uuid4()
+                    with conn.transaction(force_rollback=True):
+                        conn.execute(INSERT_EVENT, (
+                            "visit", session, session, None, None, DIRECT, datetime.now(timezone.utc),
+                        ))
+                else:
+                    check_reader_policy(conn)
+                    conn.execute("SELECT 1 FROM matchlab_analytics.events LIMIT 1").fetchone()
+        except (AnalyticsDatabaseError, psycopg.Error) as error:
+            results[key] = failure_code(error)
+        else:
+            results[key] = "OK"
+    return results
 
 
 def flush_events():
@@ -96,15 +221,11 @@ def flush_events():
     if not pending or not dsn or monotonic() < state.get("analytics_retry_after", 0):
         return
     try:
-        with connect(dsn) as conn, conn.cursor() as cursor:
-            cursor.executemany(
-                """INSERT INTO matchlab_analytics.events
-                   (kind, scope_id, session_id, round_id, mode, source, occurred_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT DO NOTHING""",
-                list(pending.values()),
-            )
-    except (psycopg.Error, ValueError):
+        with database_connection("write_dsn") as conn, conn.cursor() as cursor:
+            check_role(conn, "matchlab_writer")
+            cursor.executemany(INSERT_EVENT, list(pending.values()))
+    except (AnalyticsDatabaseError, psycopg.Error) as error:
+        LOGGER.warning("Analytics write failed [%s]", failure_code(error))
         state.analytics_retry_after = monotonic() + 30
     else:
         pending.clear()
@@ -114,10 +235,9 @@ def read_events(start, end):
     """Read a visit window and the lifetime outcomes of rounds started in it."""
     if not is_owner():
         raise PermissionError("Owner authentication required.")
-    dsn = settings("owner_analytics").get("read_dsn")
-    if not dsn:
-        raise RuntimeError("Analytics database is not configured.")
-    with connect(dsn) as conn:
+    with database_connection("read_dsn") as conn:
+        check_role(conn, "matchlab_reader")
+        check_reader_policy(conn)
         return conn.execute(
             """SELECT event.kind, event.session_id, event.mode, event.source,
                       event.occurred_at, completion.round_id IS NOT NULL AS completed
