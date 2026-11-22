@@ -34,7 +34,7 @@ For each question, the app finds the cosine similarity `c` between the two embed
 
 For example, *I enjoy watching movies at home* and *I love relaxing with films on weekends* can produce embeddings that point in similar directions. Both refer to watching films as a way to unwind. Negated answers like *I love camping* and *I hate camping* can also score highly because they share a topic. Slang, very short answers, sarcasm and text outside the model’s English training focus can affect the result. Treat the 0–100 score as a conversation starter about these answers. It has no statistical validation as a measure of relationship compatibility.
 
-**Privacy.** Names, answers and results use Streamlit’s session state. Inference runs in the app server process. Analytics storage excludes names, answers, results and IP addresses. Answers stay in the app server process and are never sent to Hugging Face. Hugging Face supplies the model and tokenizer files. A new round clears answers and scores. Use nicknames if you prefer, and keep both players’ consent in mind when opening highlights or sharing screenshots.
+**Privacy.** Names, answers and results use Streamlit’s session state. Inference runs in the app server process. Answers stay in the app server process and are never sent to Hugging Face. Hugging Face supplies the model and tokenizer files. A new round clears answers and scores. Use nicknames if you prefer, and keep both players’ consent in mind when opening highlights or sharing screenshots.
 
 ## Run locally
 
@@ -61,62 +61,7 @@ The default tests cover scoring, both modes, answer editing, inference recovery,
 
 ## Deploy on Streamlit Community Cloud
 
-In [Streamlit Community Cloud](https://share.streamlit.io/), choose **Create app**, select `btyj2005/NLP-Transformer-Mini-Project`, branch `main`, and main file `app.py`. Choose Python **3.11** in **Advanced settings** and deploy. The public game runs with or without analytics secrets. After launch, play a full round to exercise the first model download and a second round to check reuse. Cloud start-up time and memory depend on the hosting instance. [Deployment guide](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy)
-
-## Owner Analytics
-
-The owner dashboard shows visits, unique sessions, arrival sources, daily trends and game outcomes. pandas groups real events stored in Supabase PostgreSQL and Plotly draws the charts. Dates use Singapore time. Game metrics follow rounds started in the selected date range, including rounds completed later.
-
-A visit is recorded once per Streamlit session. A reload, new tab or reconnect can create a new session. The app uses random IDs and does not link sessions across browsers or devices. Known crawler, prefetch and headless clients are skipped where detectable, and signed-in owner activity is excluded. Visits made before signing in as owner may still count. Outages can leave gaps if a session ends before a write succeeds. History begins when tracking is enabled.
-
-- [LinkedIn share link](https://btyj2005-nlp-transformer-mini-project-app-d2788k.streamlit.app/?utm_source=linkedin)
-- [GitHub share link](https://btyj2005-nlp-transformer-mini-project-app-d2788k.streamlit.app/?utm_source=github)
-
-Use the LinkedIn link to replace the app URL in your LinkedIn post manually. The app counts tagged arrivals at AI MatchLab. Untagged or unsupported sources appear as Direct / Other. Views of the LinkedIn post and GitHub repository pages are outside these counts.
-
-### Enable GitHub sign-in
-
-Streamlit's built-in login requires an OpenID Connect (OIDC) provider. Supabase's GitHub sign-in handles social login for an app using Supabase Auth. Using Supabase as Streamlit's OIDC provider requires enabling its OAuth server and hosting a custom authorization UI. AI MatchLab uses Auth0's hosted sign-in to keep owner authentication within Streamlit's built-in flow. Your existing Supabase project is used for analytics storage. [Supabase OAuth server documentation](https://supabase.com/docs/guides/auth/oauth-server)
-
-1. In Auth0, create a **Regular Web Application**. Set its **Allowed Callback URLs** to `https://btyj2005-nlp-transformer-mini-project-app-d2788k.streamlit.app/oauth2callback`. Keep its client ID and client secret for Streamlit.
-2. In GitHub **Settings → Developer settings → OAuth Apps**, create an OAuth App. Use the live app as the homepage and `https://YOUR_AUTH0_DOMAIN/login/callback` as the Authorization callback URL. Generate the GitHub client secret.
-3. In Auth0 **Authentication → Social**, create a GitHub connection using the GitHub OAuth App credentials. Enable it for the Regular Web Application, and disable other connections for that application. The owner check uses the signed Auth0 issuer and the GitHub account ID `github|247741615` for `btyj2005`. Keep this as an unlinked GitHub identity so Auth0 issues that subject.
-4. Generate a random cookie secret locally with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Add the Auth0 application credentials and cookie secret to Streamlit **Manage app → Settings → Secrets** using the format below. GitHub OAuth credentials belong in Auth0 only. Sign in from the footer, then select **Owner Analytics** from the sidebar. Logout clears the Streamlit app session.
-
-### Enable persistent storage
-
-1. Open your existing **AI MatchLab Analytics** Supabase project. Go to **SQL Editor → New query**, paste the entire [analytics migration](migrations/001_owner_analytics.sql), then click **Run** as the project administrator. The migration preserves existing event rows and creates the `matchlab_analytics.events` table and its two restricted roles. Keep `matchlab_analytics` outside the exposed Data API schemas.
-2. In the SQL Editor set long, distinct random passwords for the new roles using `ALTER ROLE matchlab_writer PASSWORD 'WRITE_PASSWORD';` and `ALTER ROLE matchlab_reader PASSWORD 'READ_PASSWORD';`. Generate separate passwords, store them securely and avoid saving or sharing the password-setting query. The writer can insert only and the reader can select only. Use these roles for the app instead of using `postgres` or a Supabase service key.
-3. In the same Supabase project, open **Connect → Session pooler**. Copy the pooler hostname and take `PROJECT_REF` from the part after `postgres.` in the example username. Keep port `5432` and database `postgres`. Use usernames `matchlab_writer.PROJECT_REF` and `matchlab_reader.PROJECT_REF`. Configure both DSNs in Streamlit Secrets. The example uses PostgreSQL keyword/value syntax. Alphanumeric passwords work without extra DSN escaping. The application enforces TLS hostname and certificate validation.
-
-### Streamlit Community Cloud secrets
-
-Open the deployed app’s **Manage app → Settings → Secrets**. Add the settings below alongside any existing settings, replacing the placeholders. The two DSNs use the role passwords you set in Supabase. Supabase publishable, anon and service-role API keys are unnecessary. Keep the GitHub OAuth app secret in Auth0 only.
-
-```toml
-[auth]
-redirect_uri = "https://btyj2005-nlp-transformer-mini-project-app-d2788k.streamlit.app/oauth2callback"
-cookie_secret = "YOUR_RANDOM_COOKIE_SECRET"
-client_id = "YOUR_AUTH0_APPLICATION_CLIENT_ID"
-client_secret = "YOUR_AUTH0_APPLICATION_CLIENT_SECRET"
-server_metadata_url = "https://YOUR_AUTH0_DOMAIN/.well-known/openid-configuration"
-
-[auth.client_kwargs]
-scope = "openid"
-
-[owner_analytics]
-issuer = "https://YOUR_AUTH0_DOMAIN/"
-write_dsn = "host=YOUR_POOLER_HOST port=5432 dbname=postgres user=matchlab_writer.PROJECT_REF password=WRITE_PASSWORD sslrootcert=system"
-read_dsn = "host=YOUR_POOLER_HOST port=5432 dbname=postgres user=matchlab_reader.PROJECT_REF password=READ_PASSWORD sslrootcert=system"
-```
-
-For local use, place these values in the ignored `.streamlit/secrets.toml` and register the matching local callback URL in Auth0. Restart the app after saving secrets. With no writer configured, the game keeps working without recording events. The dashboard reports a load failure if the reader cannot connect.
-
-### Verify activation
-
-Sign in as the owner in one browser session and note the **All Time** counts. In a separate signed-out session, open the GitHub-tagged demo and complete a round. Refresh the owner dashboard and check for one new GitHub visit, start and completion from that session. This smoke test contributes real events to the existing database. Reboot the Streamlit app and verify that the saved counts are still present. Then try signing in with a different GitHub account and confirm that it has no Owner Analytics navigation or data access.
-
-Analytics retain minimal anonymous event records indefinitely for the All Time view. There is no automatic deletion on deployment. Backups and any future deletion policy are managed by the Supabase project owner. Do not commit real secrets.
+In [Streamlit Community Cloud](https://share.streamlit.io/), choose **Create app**, select `btyj2005/NLP-Transformer-Mini-Project`, branch `main`, and main file `app.py`. Choose Python **3.11** in **Advanced settings** and deploy. The public game is available without signing in. After launch, play a full round to exercise the first model download and a second round to check reuse. Cloud start-up time and memory depend on the hosting instance. [Deployment guide](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy)
 
 ## What I learned
 
