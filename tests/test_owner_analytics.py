@@ -189,18 +189,24 @@ def test_owner_navigation_and_charts(configure, monkeypatch):
     monkeypatch.setattr(dashboard, "datetime", SimpleNamespace(now=lambda _: at,
                                                              combine=datetime.combine))
     session = uuid4()
-    rows = [("visit", session, None, "GitHub", at, False),
-            ("game_started", session, "Bestie Mode", "GitHub", at, True)]
+    round_id = uuid4()
+    rows = [
+        ("visit", session, None, "GitHub", at, False, None, None, None, None, None),
+        ("game_started", session, "Bestie Mode", "GitHub", at, True, round_id, at,
+         60, [20, 40, 60, 80, 100], ["A", "B", "C", "D", "E"]),
+    ]
     calls = []
 
-    def read(start, end):
+    def read(start, end, *, include_scores):
+        assert include_scores
         calls.append((start, end))
-        return rows
+        return rows, True
 
     monkeypatch.setattr(dashboard, "read_events", read)
+    monkeypatch.setattr(dashboard, "read_private_details", lambda key: None)
     app = AppTest.from_file(str(APP)).run()
     click(app, "Owner Analytics")
-    assert len(app.get("plotly_chart")) == 3
+    assert len(app.get("plotly_chart")) == 6
     assert '"values":[0,1,0]' in app.get("plotly_chart")[0].proto.spec
     assert any("100.0%" in item.proto.body for item in app.get("html"))
     app.selectbox[0].set_value("Today").run()
@@ -209,3 +215,19 @@ def test_owner_navigation_and_charts(configure, monkeypatch):
     click(app, "Refresh Analytics")
     assert len(calls) == 3
     assert "analytics_session" not in app.session_state
+
+    app.selectbox(key="lab_selected_round").set_value(round_id).run()
+    assert not app.exception
+    assert any(item.label == "Overall compatibility" for item in app.metric)
+    assert len(app.get("plotly_chart")) == 7
+    app.selectbox(key="lab_mode").set_value("Couple Mode").run()
+    assert not app.exception
+    assert not app.get("plotly_chart")
+    click(app, "Clear Filters")
+    app.selectbox(key="lab_source").set_value("LinkedIn").run()
+    assert not app.exception
+    assert not app.get("plotly_chart")
+    app.selectbox(key="lab_period").set_value("Custom date range").run()
+    app.date_input[0].set_value((at.date(), at.date())).run()
+    assert not app.exception
+    assert calls[-1][0].day == 21
