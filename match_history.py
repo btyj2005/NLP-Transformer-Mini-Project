@@ -8,8 +8,8 @@ import psycopg
 import streamlit as st
 
 from owner_analytics import (
-    AnalyticsDatabaseError, LOGGER, check_role, database_connection, failure_code,
-    is_owner, match_history_available,
+    AnalyticsDatabaseError, LOGGER, check_reader_policy, check_role, database_connection,
+    failure_code, is_owner,
 )
 
 SCORES_SQL = """
@@ -111,3 +111,45 @@ def read_private_details(round_id):
                FROM matchlab_analytics.private_match_details WHERE round_id = %s""",
             (round_id,),
         ).fetchone()
+
+
+def match_history_available(conn):
+    return conn.execute(
+        """SELECT to_regclass('matchlab_analytics.match_scores') IS NOT NULL
+              AND to_regclass('matchlab_analytics.private_match_details') IS NOT NULL"""
+    ).fetchone()[0]
+
+
+def read_dashboard(start, end):
+    """Read visits and the lifetime outcomes of rounds started in the window."""
+    if not is_owner():
+        raise PermissionError("Owner authentication required.")
+    with database_connection("read_dsn") as conn:
+        check_role(conn, "matchlab_reader")
+        check_reader_policy(conn)
+        available = match_history_available(conn)
+        columns = "score.overall, score.scores, score.prompts" if available else "NULL, NULL, NULL"
+        score_join = ""
+        if available:
+            score_join = """
+                LEFT JOIN matchlab_analytics.match_scores score ON score.round_id = completion.scope_id
+            """
+        rows = conn.execute(
+            f"""SELECT event.kind, event.session_id, event.mode, event.source,
+                       event.occurred_at, completion.round_id IS NOT NULL AS completed,
+                       event.round_id, completion.occurred_at, {columns}
+                FROM matchlab_analytics.events AS event
+                LEFT JOIN matchlab_analytics.events AS completion
+                  ON event.kind = 'game_started'
+                 AND completion.kind = 'game_completed'
+                 AND completion.scope_id = event.scope_id
+                 AND completion.session_id = event.session_id
+                 AND completion.mode = event.mode
+                 AND completion.occurred_at >= event.occurred_at
+                {score_join}
+                WHERE event.kind IN ('visit', 'game_started')
+                  AND (%s::timestamptz IS NULL OR event.occurred_at >= %s)
+                  AND event.occurred_at < %s""",
+            (start, start, end),
+        ).fetchall()
+    return rows, available
