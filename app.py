@@ -3,9 +3,12 @@
 from base64 import b64encode
 from html import escape
 from pathlib import Path
+from uuid import uuid4
 
 import streamlit as st
 
+from analytics_dashboard import render_dashboard
+from owner_analytics import flush_events, initialize_visit, is_owner, owner_login_configured, record
 from match_insights import (
     CHANGE_COLORS, ORIGINAL_COLOR, category_averages, change_label, compare_scores,
     comparison_chart, comparison_table, question_scores, score_statistics,
@@ -18,13 +21,18 @@ ROOT = Path(__file__).parent
 st.set_page_config(page_title="AI MatchLab", page_icon="✦", layout="wide")
 st.html(ROOT / "style.css")
 state = st.session_state
+initialize_visit()
 
 
 def new_round(screen="setup"):
     state.update(screen=screen, player=0, question=0,
                  answers=[[""] * QUESTION_COUNT for _ in range(2)],
                  editing=False, error="", result=None, embeddings=None,
-                 simulation=None, simulation_error="")
+                 simulation=None, simulation_error="", analytics_round=None)
+    if screen == "setup":
+        state.analytics_round = uuid4()
+        record("mode_selected", state.analytics_round, state.mode)
+        record("game_started", state.analytics_round, state.mode)
 
 
 if "screen" not in state:
@@ -242,6 +250,8 @@ def analysis():
         # Keep user text and service internals out of the UI and application logs.
         state.update(screen="ready", error="The AI model could not finish. Check the connection and try again.")
         st.rerun()
+    if state.analytics_round:
+        record("game_completed", state.analytics_round, state.mode)
     change_screen("results")
     st.rerun()
 
@@ -482,16 +492,38 @@ def about():
     st.write("pandas also summarizes the average, lowest and highest scores. GroupBy brings questions on the same topic together so you can compare category averages before and after the change.")
     st.markdown("## About the project")
     st.write("Bryan Tock built AI MatchLab as an independent mini-project while studying for a Diploma in Applied AI & Analytics at Republic Polytechnic. It applies concepts from NVIDIA’s Building Transformer-Based Natural Language Processing Applications and Fundamentals of Accelerated Data Science certifications.")
+    st.caption("Privacy · Usage analytics record an anonymous session ID, game events, arrival "
+               "source and timestamps. Analytics exclude player names, answers and IP addresses.")
     st.button("← Back to Home", on_click=open_view, args=("home",))
 
 
-screen = {"home": "welcome", "about": "about"}.get(state.view, state.screen)
+flush_events()
+owner = is_owner()
+if state.view == "owner_analytics" and not owner:
+    state.view = "home"
+
+if owner:
+    with st.sidebar:
+        st.button("Owner Analytics", icon=":material/analytics:", on_click=open_view,
+                  args=("owner_analytics",))
+        st.button("Logout", on_click=st.logout)
+
+screen = {"home": "welcome", "about": "about", "owner_analytics": "owner_analytics"}.get(
+    state.view, state.screen
+)
 if screen not in {"setup", "question"}:
     header()
 render = {
     "welcome": welcome, "about": about, "setup": setup, "question": question_screen,
     "handoff": handoff, "ready": ready, "analysis": analysis, "results": results,
+    "owner_analytics": render_dashboard,
 }[screen]
 render()
-if screen != "about":
+if screen not in {"about", "owner_analytics"}:
     how_ai_works()
+if screen in {"welcome", "about"} and not owner and owner_login_configured():
+    if st.user.is_logged_in:
+        st.caption("This GitHub account does not have access to Owner Analytics.")
+        st.button("Logout", on_click=st.logout, type="tertiary")
+    else:
+        st.button("Owner sign in", icon=":material/lock:", on_click=st.login, type="tertiary")
