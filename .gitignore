@@ -17,3 +17,19 @@ model_cache/
 *.log
 .DS_Store
 Thumbs.db
+
+# Extra protection against accidentally committing private credentials
+.streamlit/secrets.*
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+credentials.json
+*service-account*.json
+*.tfvars
+*.tfvars.json
+*.sqlite
+*.sqlite3
+*.db
