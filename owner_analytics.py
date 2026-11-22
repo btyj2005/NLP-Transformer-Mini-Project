@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from logging import getLogger
 from pathlib import Path
+import re
 from tempfile import TemporaryDirectory
 from time import monotonic
 from uuid import uuid4
@@ -21,6 +22,53 @@ INSERT_EVENT = """INSERT INTO matchlab_analytics.events
     (kind, scope_id, session_id, round_id, mode, source, occurred_at)
     VALUES (%s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT DO NOTHING"""
+CONNECT_SQLSTATES = {
+    "28P01": "LOGIN_REJECTED",
+    "28000": "LOGIN_REJECTED",
+    "3D000": "DATABASE_NOT_FOUND",
+    "53300": "CONNECTION_LIMIT",
+    "57P03": "DATABASE_UNAVAILABLE",
+}
+POOLER_ROUTE_MESSAGES = ("tenant or user not found", "tenant/user", "(enotfound)", "worker_not_found")
+# When libpq tried multiple addresses, prefer a failure from the furthest
+# stage reached. Inspect driver text locally and emit only these fixed codes.
+CONNECT_MESSAGES = (
+    ("LOGIN_REJECTED", (
+        "authentication failed", "no password supplied", "sasl authentication",
+        "eauthquery", "no pg_hba.conf entry", "is not permitted to log in",
+    )),
+    ("DATABASE_NOT_FOUND", ("database does not exist",)),
+    ("CONNECTION_LIMIT", (
+        "too many connections", "too many clients", "max client connections reached",
+        "remaining connection slots", "maxclientsinsessionmode",
+    )),
+    ("DATABASE_UNAVAILABLE", (
+        "database system is starting up", "database system is shutting down",
+        "database system is in recovery mode", "database is paused",
+    )),
+    ("TLS_VERIFY_FAILED", (
+        "certificate verify failed", "certificate verification failed", "server certificate",
+        "root certificate", "self-signed certificate", "unknown ca", "certificate has expired",
+        "could not load ssl certificate",
+    )),
+    ("TLS_HANDSHAKE_FAILED", (
+        "ssl error:", "tls alert", "ssl is required", "does not support ssl",
+        "ssl negotiation", "tls handshake", "invalid response to gssapi negotiation",
+    )),
+    ("CONNECTION_CLOSED", (
+        "server closed the connection unexpectedly", "connection reset by peer",
+        "ssl connection has been closed unexpectedly", "eof detected",
+    )),
+    ("CONNECT_TIMEOUT", (
+        "timeout expired", "timed out", "connection timeout", "connection attempt timed out",
+    )),
+    ("CONNECTION_REFUSED", ("connection refused", "actively refused")),
+    ("NETWORK_ROUTE", ("network is unreachable", "no route to host", "network is down")),
+    ("DNS_FAILURE", (
+        "could not translate host name", "getaddrinfo failed", "name or service not known",
+        "temporary failure in name resolution", "no such host", "nodename nor servname provided",
+    )),
+)
 
 
 class AnalyticsDatabaseError(RuntimeError):
@@ -40,18 +88,21 @@ def failure_code(error):
 
 
 def connection_failure(error):
-    # libpq often supplies no SQLSTATE during startup. Match known messages
-    # locally and never return or log any part of the original driver message.
+    # Supavisor can report a routing failure as an authorization error.
     message = str(error).casefold()
-    if "tenant or user not found" in message or "tenant/user" in message:
+    if any(marker in message for marker in POOLER_ROUTE_MESSAGES):
         return "POOLER_ROUTE"
-    if "certificate" in message or "ssl" in message or "tls" in message:
-        return "TLS"
-    if (getattr(error, "sqlstate", None) in {"28P01", "28000"}
-            or "authentication failed" in message or "eauthquery" in message
-            or ("role" in message and "does not exist" in message)):
+    sqlstate = CONNECT_SQLSTATES.get(error.sqlstate)
+    if sqlstate:
+        return sqlstate
+    if re.search(r'(?:role|user) "[^"\n]+" does not exist', message):
         return "LOGIN_REJECTED"
-    return "UNREACHABLE"
+    if re.search(r'database "[^"\n]+" does not exist', message):
+        return "DATABASE_NOT_FOUND"
+    for code, markers in CONNECT_MESSAGES:
+        if any(marker in message for marker in markers):
+            return code
+    return "CONNECT_UNCLASSIFIED"
 
 
 def settings(section):
