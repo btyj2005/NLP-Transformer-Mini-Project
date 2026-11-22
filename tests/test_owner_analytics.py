@@ -68,9 +68,23 @@ def test_missing_user_agent_still_tracks_visit(configure, monkeypatch):
 
 @pytest.mark.parametrize("driver_message,code", [
     ("FATAL: Tenant or user not found", "POOLER_ROUTE"),
+    ("FATAL: (ENOTFOUND) tenant/user private not found", "POOLER_ROUTE"),
     ("FATAL: password authentication failed", "LOGIN_REJECTED"),
-    ("SSL error: certificate verify failed", "TLS"),
-    ("timeout expired", "UNREACHABLE"),
+    ('FATAL: role "private" does not exist', "LOGIN_REJECTED"),
+    ("fe_sendauth: no password supplied", "LOGIN_REJECTED"),
+    ("SSL error: certificate verify failed", "TLS_VERIFY_FAILED"),
+    ("server does not support SSL, but SSL was required", "TLS_HANDSHAKE_FAILED"),
+    ("timeout expired", "CONNECT_TIMEOUT"),
+    ("Connection refused", "CONNECTION_REFUSED"),
+    ("Network is unreachable", "NETWORK_ROUTE"),
+    ('could not translate host name "ssl-private.example" to address: Name or service not known',
+     "DNS_FAILURE"),
+    ("connection refused\nFATAL: password authentication failed", "LOGIN_REJECTED"),
+    ("SSL SYSCALL error: EOF detected", "CONNECTION_CLOSED"),
+    ('FATAL: database "private" does not exist', "DATABASE_NOT_FOUND"),
+    ("FATAL: remaining connection slots are reserved", "CONNECTION_LIMIT"),
+    ("FATAL: the database system is starting up", "DATABASE_UNAVAILABLE"),
+    ("unexpected startup response", "CONNECT_UNCLASSIFIED"),
 ])
 def test_connection_errors_report_safe_codes(monkeypatch, driver_message, code):
     def fail(*args, **kwargs):
@@ -85,6 +99,12 @@ def test_connection_errors_report_safe_codes(monkeypatch, driver_message, code):
             pytest.fail("Unexpected connection")
     assert str(detail.value) == code
     assert detail.value.__suppress_context__
+
+
+def test_connection_sqlstate_and_pooler_routing():
+    assert analytics.connection_failure(psycopg.errors.InvalidPassword("private")) == "LOGIN_REJECTED"
+    error = psycopg.errors.InvalidAuthorizationSpecification("Tenant or user not found")
+    assert analytics.connection_failure(error) == "POOLER_ROUTE"
 
 
 def test_dashboard_reports_reader_and_writer_independently(configure, monkeypatch):
