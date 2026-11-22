@@ -76,6 +76,8 @@ Use the LinkedIn link to replace the app URL in your LinkedIn post manually. The
 
 ### Enable GitHub sign-in
 
+Streamlit's built-in login requires an OpenID Connect (OIDC) provider. Supabase's GitHub sign-in handles social login for an app using Supabase Auth. Using Supabase as Streamlit's OIDC provider requires enabling its OAuth server and hosting a custom authorization UI. AI MatchLab uses Auth0's hosted sign-in to keep owner authentication within Streamlit's built-in flow. Your existing Supabase project is used for analytics storage. [Supabase OAuth server documentation](https://supabase.com/docs/guides/auth/oauth-server)
+
 1. In Auth0, create a **Regular Web Application**. Set its **Allowed Callback URLs** to `https://btyj2005-nlp-transformer-mini-project-app-d2788k.streamlit.app/oauth2callback`. Keep its client ID and client secret for Streamlit.
 2. In GitHub **Settings → Developer settings → OAuth Apps**, create an OAuth App. Use the live app as the homepage and `https://YOUR_AUTH0_DOMAIN/login/callback` as the Authorization callback URL. Generate the GitHub client secret.
 3. In Auth0 **Authentication → Social**, create a GitHub connection using the GitHub OAuth App credentials. Enable it for the Regular Web Application, and disable other connections for that application. The owner check uses the signed Auth0 issuer and the GitHub account ID `github|247741615` for `btyj2005`. Keep this as an unlinked GitHub identity so Auth0 issues that subject.
@@ -83,9 +85,13 @@ Use the LinkedIn link to replace the app URL in your LinkedIn post manually. The
 
 ### Enable persistent storage
 
-1. Create a Supabase project and run [the analytics migration](migrations/001_owner_analytics.sql) in the SQL Editor as the project administrator. The migration preserves existing event rows. Keep `matchlab_analytics` outside the exposed Data API schemas.
+1. Open your existing **AI MatchLab Analytics** Supabase project. Go to **SQL Editor → New query**, paste the entire [analytics migration](migrations/001_owner_analytics.sql), then click **Run** as the project administrator. The migration preserves existing event rows and creates the `matchlab_analytics.events` table and its two restricted roles. Keep `matchlab_analytics` outside the exposed Data API schemas.
 2. In the SQL Editor set long, distinct random passwords for the new roles using `ALTER ROLE matchlab_writer PASSWORD 'WRITE_PASSWORD';` and `ALTER ROLE matchlab_reader PASSWORD 'READ_PASSWORD';`. Generate separate passwords, store them securely and avoid saving or sharing the password-setting query. The writer can insert only and the reader can select only. Use these roles for the app instead of using `postgres` or a Supabase service key.
-3. In Supabase **Connect**, copy the host and region for the IPv4-compatible **Session pooler** on port 5432. Use usernames `matchlab_writer.PROJECT_REF` and `matchlab_reader.PROJECT_REF`. Configure both DSNs in Streamlit Secrets. The example uses PostgreSQL keyword/value syntax. Alphanumeric passwords work without extra DSN escaping. The application enforces TLS hostname and certificate validation.
+3. In the same Supabase project, open **Connect → Session pooler**. Copy the pooler hostname and take `PROJECT_REF` from the part after `postgres.` in the example username. Keep port `5432` and database `postgres`. Use usernames `matchlab_writer.PROJECT_REF` and `matchlab_reader.PROJECT_REF`. Configure both DSNs in Streamlit Secrets. The example uses PostgreSQL keyword/value syntax. Alphanumeric passwords work without extra DSN escaping. The application enforces TLS hostname and certificate validation.
+
+### Streamlit Community Cloud secrets
+
+Open the deployed app’s **Manage app → Settings → Secrets**. Add the settings below alongside any existing settings, replacing the placeholders. The two DSNs use the role passwords you set in Supabase. Supabase publishable, anon and service-role API keys are unnecessary. Keep the GitHub OAuth app secret in Auth0 only.
 
 ```toml
 [auth]
@@ -106,7 +112,9 @@ read_dsn = "host=YOUR_POOLER_HOST port=5432 dbname=postgres user=matchlab_reader
 
 For local use, place these values in the ignored `.streamlit/secrets.toml` and register the matching local callback URL in Auth0. Restart the app after saving secrets. With no writer configured, the game keeps working without recording events. The dashboard reports a load failure if the reader cannot connect.
 
-4. Verify with a staging database before sharing the tracked links. Open the public app in a separate browser session and complete a round. In an owner session, confirm the visit source and game counts, reboot the Streamlit app and verify the same records still appear. Try a second GitHub account to confirm it cannot open the dashboard. Use a staging project to keep those test visits out of production statistics.
+### Verify activation
+
+Sign in as the owner in one browser session and note the **All Time** counts. In a separate signed-out session, open the GitHub-tagged demo and complete a round. Refresh the owner dashboard and check for one new GitHub visit, start and completion from that session. This smoke test contributes real events to the existing database. Reboot the Streamlit app and verify that the saved counts are still present. Then try signing in with a different GitHub account and confirm that it has no Owner Analytics navigation or data access.
 
 Analytics retain minimal anonymous event records indefinitely for the All Time view. There is no automatic deletion on deployment. Backups and any future deletion policy are managed by the Supabase project owner. Do not commit real secrets.
 
