@@ -9,6 +9,7 @@ import streamlit as st
 
 from analytics_dashboard import render_dashboard
 from owner_analytics import flush_events, initialize_visit, is_owner, owner_login_configured, record
+from match_history import consent_marker, delete_private_details, joint_consent, save_match, sharing_available
 from match_insights import (
     CHANGE_COLORS, ORIGINAL_COLOR, category_averages, change_label, compare_scores,
     comparison_chart, comparison_table, question_scores, score_statistics,
@@ -28,7 +29,8 @@ def new_round(screen="setup"):
     state.update(screen=screen, player=0, question=0,
                  answers=[[""] * QUESTION_COUNT for _ in range(2)],
                  editing=False, error="", result=None, embeddings=None,
-                 simulation=None, simulation_error="", analytics_round=None)
+                 simulation=None, simulation_error="", analytics_round=None,
+                 match_consent={}, deletion_code=None)
     if screen == "setup":
         state.analytics_round = uuid4()
         record("mode_selected", state.analytics_round, state.mode)
@@ -150,6 +152,7 @@ def save_answer(player, index, widget_key, advance):
     if state.screen != "question" or (player, index) != (state.player, state.question):
         return
     answer = state[widget_key]
+    state.match_consent.pop(player, None)
     state.answers[player][index] = answer
     state.error = ""
     if not advance:
@@ -166,6 +169,10 @@ def save_answer(player, index, widget_key, advance):
     if index < QUESTION_COUNT - 1:
         state.question += 1
     else:
+        if state.get(f"share_{widget_key}") is True:
+            state.match_consent[player] = consent_marker(
+                state.analytics_round, state.names[player], state.answers[player]
+            )
         state.screen = "ready" if player == 1 or state.editing else "handoff"
 
 
@@ -197,6 +204,15 @@ def question_fields(player, index, prompt, hint, widget_key):
             "Your answer", key=widget_key, max_chars=MAX_ANSWER_LENGTH,
             placeholder="Write one or two short sentences in English…", height=115,
         )
+        if index == QUESTION_COUNT - 1 and sharing_available():
+            st.caption(
+                "Optional · If both players agree, the verified AI MatchLab owner can view "
+                "both names and all ten written answers for up to 30 days. Either player can "
+                "remove them with the shared deletion code shown after this round."
+            )
+            state[f"share_{widget_key}"] = False
+            st.checkbox("I agree to save my name and five written answers for this round.",
+                        key=f"share_{widget_key}")
         left, right = st.columns(2)
         left.form_submit_button("← Back", key=f"back_{widget_key}", width="stretch", on_click=save_answer,
                                 args=(player, index, widget_key, False))
@@ -252,6 +268,12 @@ def analysis():
         st.rerun()
     if state.analytics_round:
         record("game_completed", state.analytics_round, state.mode)
+        share = joint_consent(state.analytics_round, state.match_consent, state.names, state.answers)
+        state.deletion_code = save_match(
+            state.analytics_round, state.result, [prompt for prompt, _ in QUESTIONS[state.mode]],
+            (state.names, state.answers) if share else None,
+        )
+        state.match_consent.clear()
     change_screen("results")
     st.rerun()
 
@@ -428,6 +450,12 @@ def results():
     with st.container(key="results_tools"):
         what_if(original)
         explain_answer_comparison()
+    if state.deletion_code:
+        with st.expander("Shared details and deletion code"):
+            st.write("Both players agreed to share their names and answers for this round. "
+                     "Keep a copy of this code for each player. Anyone holding it can "
+                     "submit it under About → Delete shared match details.")
+            st.code(str(state.deletion_code), language=None)
     again, switch = st.columns(2)
     again.button("Play Again", type="primary", width="stretch", on_click=new_round)
     switch.button("Switch Mode", width="stretch", on_click=new_round, args=("welcome",))
@@ -492,15 +520,28 @@ def about():
     st.write("pandas also summarizes the average, lowest and highest scores. GroupBy brings questions on the same topic together so you can compare category averages before and after the change.")
     st.markdown("## About the project")
     st.write("Bryan Tock built AI MatchLab as an independent mini-project while studying for a Diploma in Applied AI & Analytics at Republic Polytechnic. It applies concepts from NVIDIA’s Building Transformer-Based Natural Language Processing Applications and Fundamentals of Accelerated Data Science certifications.")
-    st.caption("Privacy · Usage analytics record an anonymous session ID, game events, arrival "
-               "source and timestamps. Analytics exclude player names, answers and IP addresses.")
+    st.caption("Privacy · Anonymous analytics may include game events, arrival source, timestamps "
+               "and match scores. Names and written answers are saved only if both players opt in.")
+    with st.expander("Delete shared match details"):
+        st.write("Use the deletion code from your results to remove both players’ saved names "
+                 "and answers. Anonymous scores remain.")
+        with st.form("delete_shared_details", clear_on_submit=True):
+            code = st.text_input("Deletion code", type="password", max_chars=36)
+            if st.form_submit_button("Delete shared details"):
+                if delete_private_details(code):
+                    st.success("Any shared names and answers associated with this code have been removed.")
+                else:
+                    st.error("The request could not be processed. Check the code and try again.")
+
     st.button("← Back to Home", on_click=open_view, args=("home",))
 
 
 flush_events()
 owner = is_owner()
-if state.view == "owner_analytics" and not owner:
-    state.view = "home"
+if not owner:
+    state.pop("lab_snapshot", None)
+    if state.view == "owner_analytics":
+        state.view = "home"
 
 if owner:
     with st.sidebar:

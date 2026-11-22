@@ -282,26 +282,45 @@ def flush_events():
         pending.clear()
 
 
-def read_events(start, end):
-    """Read a visit window and the lifetime outcomes of rounds started in it."""
+def match_history_available(conn):
+    return conn.execute(
+        """SELECT to_regclass('matchlab_analytics.match_scores') IS NOT NULL
+              AND to_regclass('matchlab_analytics.private_match_details') IS NOT NULL"""
+    ).fetchone()[0]
+
+
+def read_events(start, end, *, include_scores=False):
+    """Read visits and the lifetime outcomes of rounds started in the window."""
     if not is_owner():
         raise PermissionError("Owner authentication required.")
     with database_connection("read_dsn") as conn:
         check_role(conn, "matchlab_reader")
         check_reader_policy(conn)
-        return conn.execute(
-            """SELECT event.kind, event.session_id, event.mode, event.source,
-                      event.occurred_at, completion.round_id IS NOT NULL AS completed
-               FROM matchlab_analytics.events AS event
-               LEFT JOIN matchlab_analytics.events AS completion
-                 ON event.kind = 'game_started'
-                AND completion.kind = 'game_completed'
-                AND completion.scope_id = event.scope_id
-                AND completion.session_id = event.session_id
-                AND completion.mode = event.mode
-                AND completion.occurred_at >= event.occurred_at
-               WHERE event.kind IN ('visit', 'game_started')
-                 AND (%s::timestamptz IS NULL OR event.occurred_at >= %s)
-                 AND event.occurred_at < %s""",
+        available = include_scores and match_history_available(conn)
+        columns = ""
+        score_join = ""
+        if include_scores:
+            columns = ", event.round_id, completion.occurred_at"
+            columns += ", score.overall, score.scores, score.prompts" if available else ", NULL, NULL, NULL"
+        if available:
+            score_join = """
+                LEFT JOIN matchlab_analytics.match_scores score ON score.round_id = completion.scope_id
+            """
+        rows = conn.execute(
+            f"""SELECT event.kind, event.session_id, event.mode, event.source,
+                       event.occurred_at, completion.round_id IS NOT NULL AS completed {columns}
+                FROM matchlab_analytics.events AS event
+                LEFT JOIN matchlab_analytics.events AS completion
+                  ON event.kind = 'game_started'
+                 AND completion.kind = 'game_completed'
+                 AND completion.scope_id = event.scope_id
+                 AND completion.session_id = event.session_id
+                 AND completion.mode = event.mode
+                 AND completion.occurred_at >= event.occurred_at
+                {score_join}
+                WHERE event.kind IN ('visit', 'game_started')
+                  AND (%s::timestamptz IS NULL OR event.occurred_at >= %s)
+                  AND event.occurred_at < %s""",
             (start, start, end),
         ).fetchall()
+    return (rows, available) if include_scores else rows
