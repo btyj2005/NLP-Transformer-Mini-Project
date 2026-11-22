@@ -6,7 +6,7 @@ import psycopg
 from streamlit.testing.v1 import AppTest
 
 import owner_analytics as analytics
-from analytics_dashboard import date_window, summarize
+from owner_dashboard import date_window, summarize
 from test_game import APP, click
 
 
@@ -180,7 +180,7 @@ def test_singapore_window_and_summaries():
 
 def test_owner_navigation_and_charts(configure, monkeypatch):
     from types import SimpleNamespace
-    import analytics_dashboard as dashboard
+    import owner_dashboard as dashboard
 
     monkeypatch.setattr(analytics.st, "user", User(
         iss=configure, sub=analytics.GITHUB_SUBJECT, exp=4102444800,
@@ -197,12 +197,11 @@ def test_owner_navigation_and_charts(configure, monkeypatch):
     ]
     calls = []
 
-    def read(start, end, *, include_scores):
-        assert include_scores
+    def read(start, end):
         calls.append((start, end))
         return rows, True
 
-    monkeypatch.setattr(dashboard, "read_events", read)
+    monkeypatch.setattr(dashboard, "read_dashboard", read)
     monkeypatch.setattr(dashboard, "read_private_details", lambda key: None)
     app = AppTest.from_file(str(APP)).run()
     click(app, "Owner Analytics")

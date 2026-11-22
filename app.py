@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import streamlit as st
 
-from analytics_dashboard import render_dashboard
+from owner_dashboard import render_dashboard
 from owner_analytics import flush_events, initialize_visit, is_owner, owner_login_configured, record
 from match_history import consent_marker, delete_private_details, joint_consent, save_match, sharing_available
 from match_insights import (

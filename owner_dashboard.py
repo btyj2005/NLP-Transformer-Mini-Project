@@ -10,10 +10,10 @@ import plotly.graph_objects as go
 import psycopg
 import streamlit as st
 
-from match_history import read_private_details
+from match_history import read_dashboard, read_private_details
 from owner_analytics import (
     DIRECT, MODES, SOURCES, AnalyticsDatabaseError, check_connections,
-    failure_code, is_owner, read_events,
+    failure_code, is_owner,
 )
 
 SGT = ZoneInfo("Asia/Singapore")
@@ -378,7 +378,7 @@ def dashboard_body():
     if reload_data or snapshot is None or snapshot[:2] != (start, end):
         try:
             with st.spinner("Loading analytics…", show_time=False):
-                rows, available = read_events(start, end, include_scores=True)
+                rows, available = read_dashboard(start, end)
             snapshot = start, end, datetime.now(SGT), rows, available
             st.session_state.lab_snapshot = snapshot
         except (psycopg.Error, AnalyticsDatabaseError) as error:
